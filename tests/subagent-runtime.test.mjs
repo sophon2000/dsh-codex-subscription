@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, writeFile, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { inspectSubagentRuntime, loadSubagentRuntime, matchingSubagentRuntimeVersion } from '../src/subagent-runtime.js'
@@ -12,7 +12,7 @@ test('missing optional runtime never loads a module or launches a process', asyn
 })
 
 test('preparation checks the provider-local CLI without shell or PATH and supports retry', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'subscription-runtime-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'subscription-runtime-')))
   try {
     const provider = join(root, 'package.json'), host = join(root, 'host.json'), entry = join(root, 'index.js')
     await writeFile(provider, JSON.stringify({ version: '0.1.7-rc.2' }))
