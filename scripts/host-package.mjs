@@ -109,7 +109,33 @@ function payloadFiles() {
   ].sort()
 }
 
-export function prepareHostPackage({ hostManifest, pnpmCli, output }) {
+/** pnpm normalizes package.json while packing. Hash the actual archive bytes. */
+export async function packedFileDigests(bytes, expectedFiles) {
+  const { Parser } = await import('tar')
+  const expected = new Set(expectedFiles), hashes = new Map()
+  let failure
+  await new Promise((done, reject) => {
+    const parser = new Parser({ strict: true, onReadEntry(entry) {
+      if (entry.type === 'Directory') { entry.resume(); return }
+      const file = entry.path.startsWith('package/') ? entry.path.slice(8) : ''
+      if (entry.type !== 'File' || !expected.has(file) || hashes.has(file)) {
+        failure = new Error(`Unexpected packed payload entry: ${entry.path}`)
+        entry.resume()
+        return
+      }
+      const hash = createHash('sha256')
+      hashes.set(file, hash)
+      entry.on('data', bytes => hash.update(bytes))
+    } })
+    parser.on('error', reject)
+    parser.on('end', () => failure ? reject(failure) : done())
+    parser.end(bytes)
+  })
+  assert.deepEqual([...hashes.keys()].sort(), [...expected].sort(), 'Archive file set differs from payload')
+  return Object.fromEntries([...hashes].sort(([a], [b]) => a.localeCompare(b, 'en')).map(([file, hash]) => [file, hash.digest('hex')]))
+}
+
+export async function prepareHostPackage({ hostManifest, pnpmCli, output }) {
   const config = json(join(root, 'host-artifact.json'))
   const template = json(join(root, 'package.json'))
   assert.equal(git(['status', '--porcelain', '--untracked-files=normal']), '', 'Commit source and rebuilt lib before creating a fixed artifact')
@@ -136,8 +162,7 @@ export function prepareHostPackage({ hostManifest, pnpmCli, output }) {
     if (packed.error) throw packed.error
     assert.equal(packed.status, 0, packed.stderr)
     const bytes = readFileSync(join(destination, archiveName))
-    const files = Object.fromEntries([...payloadFiles(), 'package.json', 'host-package.json'].sort()
-      .map(file => [file, digest(readFileSync(join(stage, file)))]))
+    const files = await packedFileDigests(bytes, [...payloadFiles(), 'package.json', 'host-package.json'])
     const receipt = { ...binding, archive: archiveName, sha256: digest(bytes),
       integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`, bytes: bytes.length, files }
     writeFileSync(join(destination, `${archiveName}.json`), JSON.stringify(receipt, null, 2) + '\n')
@@ -155,7 +180,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   assert.ok(options['--host'], 'An explicit --host package.json is required')
   if (command === 'prepare') {
     assert.ok(options['--pnpm-cli'] && options['--output'], 'prepare requires --pnpm-cli and --output')
-    console.log(JSON.stringify(prepareHostPackage({ hostManifest: resolve(options['--host']), pnpmCli: resolve(options['--pnpm-cli']), output: options['--output'] }), null, 2))
+    console.log(JSON.stringify(await prepareHostPackage({ hostManifest: resolve(options['--host']), pnpmCli: resolve(options['--pnpm-cli']), output: options['--output'] }), null, 2))
   } else {
     assert.equal(command, 'verify', 'Use prepare or verify')
     assert.ok(options['--plugin'], 'verify requires --plugin')

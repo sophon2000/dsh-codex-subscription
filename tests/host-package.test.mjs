@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
-import { adaptedManifest, inspectHost, verifyHostPackage } from '../scripts/host-package.mjs'
+import { adaptedManifest, inspectHost, packedFileDigests, verifyHostPackage } from '../scripts/host-package.mjs'
+import { create } from 'tar'
 
 const version = '0.2.1-rc.2.vh.7.local.20261024.1'
 const tools = '@deepseek-ai/dsh-tools'
@@ -82,4 +84,20 @@ test('the explicit host must be DSH at the fixed target version', t => {
   assert.throws(() => inspectHost(f.host, f.template, '0.2.1-rc.3'), /host version differs/)
   f.write(f.host, { name: 'unrelated', version })
   assert.throws(() => inspectHost(f.host, f.template, version), /installed DSH/)
+})
+
+test('receipt hashes the packed manifest after packer normalization, and rejects extra files', async t => {
+  const f = fixture(t)
+  const directory = join(f.directory, 'package')
+  mkdirSync(directory)
+  const packed = JSON.stringify({ name: 'synthetic-package', version: '1.0.0' })
+  writeFileSync(join(directory, 'package.json'), packed)
+  const archive = join(f.directory, 'fixture.tgz')
+  create({ gzip: true, sync: true, cwd: f.directory, file: archive }, ['package'])
+  assert.deepEqual(await packedFileDigests(readFileSync(archive), ['package.json']), {
+    'package.json': createHash('sha256').update(packed).digest('hex'),
+  })
+  writeFileSync(join(directory, 'unexpected.env'), 'synthetic fixture only')
+  create({ gzip: true, sync: true, cwd: f.directory, file: archive }, ['package'])
+  await assert.rejects(packedFileDigests(readFileSync(archive), ['package.json']), /Unexpected packed payload/)
 })
