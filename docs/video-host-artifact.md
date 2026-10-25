@@ -57,3 +57,7 @@ acceptance. Packaging tests do not publish personal profiles or make subscriptio
 
 DSH core fixes remain in the DSH fork; Video preset and branding configuration stay
 in video-harness. This flow changes package wiring, not those ownerships.
+
+## Sidebar account entry / 侧栏账号入口
+
+The client contributes `codex` to DSH's `settings.launcher.account` slot. Deployments opt in with `ui-settings-account.config.accountMenuProviders: [codex]`; ordinary DSH retains its DeepSeek default. The row observes the existing account controller and opens `codex-subscription`, whose initial tab is Start. It does not start authentication or switch models. Browser login, device login and multiple accounts remain on the existing settings page. Unloading the plugin removes its contribution.

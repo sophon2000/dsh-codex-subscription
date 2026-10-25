@@ -21,6 +21,7 @@ import { createSubscriptionRpcClient } from './rpc-contract.js'
 import { CodexComposerQuota } from './client-composer-quota.jsx'
 import { CodexModelSelect } from './client-model-select.jsx'
 import { VoiceCallButton } from './client-voice-call.jsx'
+import { CodexAccountEntry } from './client-account-entry.jsx'
 import { CodexSection } from './client-section.jsx'
 import { createHostDiagnostics } from './diagnostic-host.js'
 
@@ -76,6 +77,10 @@ export function apply(ctx) {
     name: 'settings.section', id: 'codex-subscription', order: 15,
     label: () => t('nav'), locale: NS, inject: () => ({ preference, rpc: rpc, accountStatus, t, diagnostics, defaultModel }),
   }, CodexSection))
+  ctx.slots.inject('settings.launcher.account', () => ctx.slots.register({
+    name: 'settings.launcher.account', id: 'codex', order: 15, locale: NS,
+    inject: () => ({ hooks: { accountStatus }, t }),
+  }, CodexAccountEntry))
   const sessions = ctx.get('sessions')
   // The quota readout and the voice button sit in the composer's right slot. They register on the root context, like the
   // composer's other entries, so DSH's composer always finds them (a session scope can be a different slot registry).

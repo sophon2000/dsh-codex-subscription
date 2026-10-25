@@ -1,4 +1,5 @@
 export const zh = {
+  accountEntrySignIn: '登录 Codex', accountEntryManage: 'Codex 账号',
   "diagnosticsSnapshotTime": "报告快照时间：",
   "diagnosticsUnresolved": "仍有其他未恢复的失败记录，见上方摘要。",
   "diagnosticSeverity_warning": "需关注",
@@ -284,6 +285,7 @@ export const zh = {
 }
 
 export const en = {
+  accountEntrySignIn: 'Sign in to Codex', accountEntryManage: 'Codex account',
   "diagnosticsSnapshotTime": "Report captured at:",
   "diagnosticsUnresolved": "Other failures remain without a later success; see the summary.",
   "diagnosticSeverity_warning": "Attention",
