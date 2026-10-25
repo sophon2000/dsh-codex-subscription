@@ -11,7 +11,7 @@ The ordinary upstream package and compatibility declarations remain unchanged.
 
 Install this repository's locked dependencies with its declared pnpm version,
 run `pnpm run check`, and commit source and generated `lib/` changes. Prepare the
-consumer's locked DSH installation and its artifact packer. Change plugin/host
+consumer's locked DSH installation and its artifact packer. Use that actual consumer installation for the peer snapshot; an all-package rehearsal install may hoist a different compatible third-party version than the product lock. Change plugin/host
 versions through a reviewed `host-artifact.json` commit. Then run:
 
 ```text
@@ -19,6 +19,7 @@ node scripts/host-package.mjs prepare --host "<installed-dsh>/package.json" --pn
 ```
 
 先按本仓锁文件安装、测试和构建并提交，再指定消费端已安装的 **DSH CLI package.json**（不是 Profile 或工作区 manifest）与固定 pnpm 脚本执行上述命令。
+宿主快照必须来自实际消费端的冻结安装；全包冷安装可能将兼容的第三方包提升到不同版本，不能据此替代产品锁中的单实例基线。
 路径含空格时加引号；Windows 也用 `node` 和 `.cjs` 参数，不依赖 Bash、`ln`、管理员软链接或安装钩子。
 
 The producer requires a clean Git tree and exact host/packer versions. It pins
