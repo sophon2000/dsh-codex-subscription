@@ -56,3 +56,15 @@ request does not imply an immediate npm release.
 Main may retain the current stable package version while unreleased fixes
 accumulate; all runtime acceptance gates still apply. Version increments,
 release tags and publication belong to the separately approved release.
+
+<a id="help-maintain"></a>
+
+## 共同维护与开发 / Help maintain and develop
+
+希望长期负责某个模块或开发方向，可以[开个 Issue 聊聊](https://github.com/WSL043/dsh-codex-subscription/issues/new?template=help-maintain.yml)。共同维护包括主动跟进相关问题、修复回归、开发改进、维护测试，以及审查该模块的 PR。日常工作按模块分工，具体改动通过 PR 协作。
+
+欢迎先一起完成一项改进，再逐步确定分工。普通贡献可以直接提 Issue 或 PR，无需登记。项目方向、main 合并和版本发布仍由项目负责人统筹，仓库权限另行商定。
+
+To take ongoing responsibility for a module or development area, [open an issue](https://github.com/WSL043/dsh-codex-subscription/issues/new?template=help-maintain.yml). Maintainers follow up on related issues, fix regressions, develop improvements, maintain tests and review pull requests for their area. Work is divided by module, with changes developed through pull requests.
+
+We can start with one improvement and agree on responsibilities as we work together. Ordinary contributions can go straight to an issue or pull request without signing up. The project owner coordinates project direction, main merges and releases; repository access is agreed separately.
