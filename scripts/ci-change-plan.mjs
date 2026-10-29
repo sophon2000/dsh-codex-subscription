@@ -43,10 +43,13 @@ const files = (explicitFiles === undefined ? git('diff', '--name-only', `${base}
   .split(',').flatMap(value => value.split(/\r?\n/u)).map(value => value.trim()).filter(Boolean)
 const matches = patterns => files.some(file => patterns.some(pattern => pattern.test(file)))
 
-const plannerChanged = matches([/^scripts\/(?:ci-change-plan|test-groups|run-tests)\.mjs$/u, /^\.github\/workflows\/ci\.yml$/u,
-  /^\.github\/scripts\/(?:accept-official-release\.ps1|test-official-runtime\.mjs)$/u])
+// Manual CI is a validation-only way to rerun the complete acceptance matrix,
+// including after a test-only follow-up would otherwise select fewer gates.
+const fullAcceptance = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch'
+const plannerChanged = fullAcceptance || matches([/^scripts\/(?:ci-change-plan|test-groups|run-tests)\.mjs$/u, /^\.github\/workflows\/ci\.yml$/u,
+  /^\.github\/scripts\/(?:accept-official-release\.ps1|test-official-runtime\.mjs|prepare-official-test-dependencies\.mjs)$/u])
 const changedTest = group => files.some(file => testGroup(file) === group)
-const runtime = matches([
+const runtime = fullAcceptance || matches([
   /^src\//u,
   /^lib\//u,
   /^cordis\.patch\.yml$/u,
@@ -79,9 +82,11 @@ const official = plannerChanged || runtime || matches([
   /^pnpm-workspace\.yaml$/u,
 ])
 
-if (runtime && publishedVersion && compareVersions(packageVersion, publishedVersion) <= 0) {
-  console.error(`Runtime-bearing files changed after ${publishedVersion}, but package.json is still ${packageVersion}.`)
-  console.error('Advance the package version before merging so main cannot advertise code that npm latest does not contain.')
+// Main can accumulate accepted fixes before a release. Equal versions still
+// run every runtime gate; publication and immutable assets have their own gates.
+if (runtime && publishedVersion && compareVersions(packageVersion, publishedVersion) < 0) {
+  console.error(`Runtime-bearing files changed, but package.json ${packageVersion} is behind published ${publishedVersion}.`)
+  console.error('Synchronize the package metadata with the current stable release before merging.')
   process.exit(1)
 }
 

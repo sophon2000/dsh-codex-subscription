@@ -40,7 +40,8 @@ export function inspectHost(hostManifest, template, expectedVersion) {
     assert.equal(json(join(found, 'package.json')).version, expectedVersion, `Mixed DSH family: ${name}`)
     refs.push(join(found, 'package.json'))
   }
-  const names = new Set([...Object.keys(template.peerDependencies), '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-sdk-protocol'])
+  const names = new Set([...Object.keys(template.peerDependencies), '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-sdk-protocol',
+    '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-format-catalog'])
   const packages = {}, roots = {}
   for (const name of names) {
     const found = packageRoot(name, refs)
@@ -99,11 +100,11 @@ function git(args) {
   return result.stdout.trim()
 }
 
-function payloadFiles() {
+export function payloadFiles() {
   // Explicit allowlist: no credentials, node_modules, symlinks, maps or machine state.
   return ['README.md', 'README.en.md', 'DIRECTORY.md', 'compatibility.json', 'LICENSE',
     'SECURITY.md', 'THIRD_PARTY_NOTICES.md', 'icon-subscription.webp', 'cordis.patch.yml',
-    'scripts/host-package.mjs',
+    'scripts/host-package.mjs', 'native/linux-voice-helper.py', 'native/README.md',
     ...readdirSync(join(root, 'lib')).filter(x => x.endsWith('.js')).map(x => `lib/${x}`),
     ...readdirSync(join(root, 'locale')).filter(x => x.endsWith('.json')).map(x => `locale/${x}`),
   ].sort()

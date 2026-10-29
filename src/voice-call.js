@@ -1,5 +1,6 @@
 import { CHANNEL } from './rpc-contract.js'
 import { createBargeInGate } from './voice-barge-in.js'
+import { voiceCallCapability } from './voice-problems.js'
 
 const ICE_WAIT_MS = 3_000
 
@@ -45,14 +46,24 @@ const loudness = (analyser, buffer) => {
  * plugin's host turns the offer into a call, joins it, and runs what is asked as turns of this conversation.
  * Resolves with a handle once the call is connected; rejects with the reason when it could not start.
  */
-export async function openVoiceCall({ rpc, sessionId, onEnd }) {
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection !== 'function') throw new Error('unsupported')
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-  const connection = new RTCPeerConnection()
-  const sound = new Audio()
-  sound.autoplay = true
-  const AudioContextClass = window.AudioContext ?? window.webkitAudioContext
-  const context = AudioContextClass ? new AudioContextClass() : undefined
+export async function openVoiceCall({ rpc, sessionId, onEnd, signal }) {
+  signal?.throwIfAborted()
+  const unsupported = voiceCallCapability()
+  if (unsupported) throw Object.assign(new Error('Voice is not supported in this environment'), { code: unsupported })
+  let connection
+  try { connection = new RTCPeerConnection() }
+  catch {
+    throw Object.assign(new Error('WebRTC could not initialize'), { code: 'voice-no-webrtc' })
+  }
+  let stream, sound, context
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+    signal?.throwIfAborted()
+    sound = new Audio()
+    sound.autoplay = true
+    const AudioContextClass = window.AudioContext ?? window.webkitAudioContext
+    context = AudioContextClass ? new AudioContextClass() : undefined
+  } catch (error) { stream?.getTracks().forEach(track => track.stop()); connection.close(); throw error }
   const analysers = { mic: undefined, assistant: undefined }
   const watch = (name, source) => {
     if (!context) return
@@ -72,6 +83,7 @@ export async function openVoiceCall({ rpc, sessionId, onEnd }) {
   const end = async () => {
     if (ended) return
     ended = true
+    signal?.removeEventListener('abort', aborted)
     clearInterval(monitor)
     if (context) chime(context, [740, 520])
     for (const track of stream.getTracks()) track.stop()
@@ -81,16 +93,20 @@ export async function openVoiceCall({ rpc, sessionId, onEnd }) {
     setTimeout(() => { void context?.close().catch(() => {}) }, 600)
     onEnd?.()
   }
+  const aborted = () => { void end() }
+  signal?.addEventListener('abort', aborted, { once: true })
   connection.addEventListener('connectionstatechange', () => { if (['failed', 'disconnected', 'closed'].includes(connection.connectionState)) void end() })
   try {
     await context?.resume()
     await connection.setLocalDescription(await connection.createOffer())
     await waitForCandidates(connection)
-    const result = await rpc.call(CHANNEL, 'voice/start', { sessionId, sdp: connection.localDescription.sdp })
+    const result = await rpc.call(CHANNEL, 'voice/start', { sessionId, sdp: connection.localDescription.sdp }, signal)
+    signal?.throwIfAborted()
     if (!result.ok) throw new Error(result.error?.message ?? 'start failed')
     await connection.setRemoteDescription({ type: 'answer', sdp: result.value.answer })
   } catch (error) {
     ended = true
+    signal?.removeEventListener('abort', aborted)
     for (const track of stream.getTracks()) track.stop()
     try { connection.close() } catch { /* already closed */ }
     void context?.close().catch(() => {})

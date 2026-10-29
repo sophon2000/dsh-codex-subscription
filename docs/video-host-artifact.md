@@ -61,3 +61,18 @@ in video-harness. This flow changes package wiring, not those ownerships.
 ## Sidebar account entry / 侧栏账号入口
 
 The client contributes `codex` to DSH's `settings.launcher.account` slot. Deployments opt in with `ui-settings-account.config.accountMenuProviders: [codex]`; ordinary DSH retains its DeepSeek default. The row observes the existing account controller and opens `codex-subscription`, whose initial tab is Start. It does not start authentication or switch models. Browser login, device login and multiple accounts remain on the existing settings page. Unloading the plugin removes its contribution.
+
+## 3.2.1 integration / 上游 3.2.1
+
+The 3.2.1-vh.7 artifact retains the fixed vh11 host and sidebar account entry.
+The upstream 3.2.1 source is `3afece2715009b8adcb4ae3cecdc4b456a75e9d0`.
+Upstream history was rewritten: our former `22ab570` and upstream `4ff2124`
+have identical tree `725b7088b4ef35a6426e848ba4771d917bd864c8`. Integration
+uses that explicit content base and retains both real heads as merge parents.
+
+The portable archive includes the deferred client chunks and Linux voice helper
+with its README. Session SDK and message-projection catalog peers now join the
+exact host version and singleton checks, because the new upstream dynamically
+loads them. Linux voice capture still requires separate native acceptance;
+packaging its helper does not establish that acceptance. Existing OAuth data
+and optional feature defaults remain owned by the upstream settings lifecycle.

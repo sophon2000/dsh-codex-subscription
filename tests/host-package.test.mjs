@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { globSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
-import { adaptedManifest, inspectHost, packedFileDigests, verifyHostPackage } from '../scripts/host-package.mjs'
+import { adaptedManifest, inspectHost, packedFileDigests, payloadFiles, verifyHostPackage } from '../scripts/host-package.mjs'
 import { create } from 'tar'
 
 const version = '0.2.1-rc.2.vh.7.local.20261024.1'
@@ -21,7 +21,8 @@ function fixture(t) {
   }
   const host = join(pkg('@deepseek-ai/dsh'), 'package.json')
   for (const name of ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', tools,
-    '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-sdk-protocol']) pkg(name)
+    '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-sdk-protocol',
+    '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-format-catalog']) pkg(name)
   const template = { name: 'dsh-codex-subscription', version: '3.1.6-dev.0', scripts: { build: 'never-run' },
     files: ['lib/*.js'], exports: { '.': './lib/index.js' }, devDependencies: { ignored: '1' },
     dependencies: { '@deepseek-ai/dsh-home-paths': 'official', ws: '8.21.3' },
@@ -101,3 +102,24 @@ test('receipt hashes the packed manifest after packer normalization, and rejects
   create({ gzip: true, sync: true, cwd: f.directory, file: archive }, ['package'])
   await assert.rejects(packedFileDigests(readFileSync(archive), ['package.json']), /Unexpected packed payload/)
 })
+
+// The upstream package manifest owns the runtime file closure. A new runtime asset
+// must not silently disappear from the separate Video host packer.
+test('host archive retains every upstream release file, including deferred chunks and native helper', () => {
+  const root = new URL('../', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('package.json', root)))
+  const upstreamFiles = globSync(manifest.files, { cwd: root }).map(file => file.replaceAll('\\', '/'))
+  assert.deepEqual(payloadFiles(), [...new Set([...upstreamFiles, 'scripts/host-package.mjs', 'native/README.md'])].sort())
+})
+
+for (const name of ['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-format-catalog']) {
+  test(`dynamic SDK ${name} is pinned and rejects an equal-version second instance`, t => {
+    const f = fixture(t)
+    f.stage()
+    const manifest = JSON.parse(readFileSync(join(f.plugin, 'package.json')))
+    assert.equal(manifest.peerDependencies[name], version)
+    rmSync(join(f.plugin, 'node_modules', name))
+    f.pkg(name, version, join(f.plugin, 'node_modules'))
+    assert.throws(() => verifyHostPackage(f.plugin, f.host), /Duplicate host runtime/)
+  })
+}

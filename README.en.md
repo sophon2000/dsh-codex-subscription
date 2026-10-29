@@ -39,13 +39,17 @@ Models and quota depend on what your account returns. [Complete feature list →
 
 Let DeepSeek or any other DSH model use the apps you connected in ChatGPT: GitHub, Gmail, Google Drive, Calendar and more. Models search first, then call, and by default every change asks for your approval (you can switch that off in settings). Off by default; turn it on under Web & tools.
 
-Web search source, ChatGPT connectors and official Codex subtasks are on **Settings → Codex subscription → Web & tools**, with one master switch at the top: when off, conversations on DeepSeek and other non-Codex models no longer use subscription web search (DSH search is used instead), image generation or ChatGPT connectors; Codex subscription models are not affected. On by default.
+Web search and webpage reading sources, ChatGPT connectors and official Codex independent subtasks are on **Settings → Codex subscription → Web & tools**, with one master switch at the top: when off, conversations on DeepSeek and other non-Codex models no longer use subscription web search (DSH search is used instead), image generation or ChatGPT connectors; Codex subscription models are not affected. On by default.
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-interop-en-dark.webp"><img src="docs/assets/ui-interop-en-light.webp" width="640" alt="Web & tools settings: search and webpage reading sources, connector permissions and independent subtasks"></picture></p>
 
 </details>
 
 ## Prepare DSH
 
-Verified against DSH `0.2.1-rc.3` (the `next` channel), with `0.2.1-rc.2` still supported; the minimum supported version is `0.1.7-rc.2`. Please upgrade older DSH releases first.
+Verified against DSH `0.2.1-rc.4` (the `next` channel), with `0.2.1-rc.3` and `0.2.1-rc.2` still supported; the minimum supported version is `0.1.7-rc.2`. Please upgrade older DSH releases first.
+
+Also supports the preview host `0.2.2-alpha.2`. See the [compatibility notes](docs/dsh-022-alpha2-compatibility.md) for scope and validation limits.
 
 This plugin supports the latest DeepSeek Harness release recorded in its package metadata and requires a ChatGPT account that currently has Codex access.
 
@@ -68,7 +72,7 @@ For this fork's pinned Video host adaptation and portable archive workflow, see 
 2. Paste this package name, with its version, into the **Package name or address** field:
 
    ```text
-   dsh-codex-subscription@3.1.6
+   dsh-codex-subscription@3.2.1
    ```
 
 3. Click **Install** and wait for completion. Follow the page instructions; save your work before restarting if requested.
@@ -85,7 +89,7 @@ Why the version is included: DSH's plugin page only installs versions that are a
 <summary>Terminal installation (with an existing dsh command)</summary>
 
 ```sh
-dsh plugin --profile web add dsh-codex-subscription@3.1.6
+dsh plugin --profile web add dsh-codex-subscription@3.2.1
 ```
 
 Follow the restart instructions, then sign in under **Settings → Codex**. Both the Plugins page and the terminal use DSH's installation management.
@@ -98,7 +102,7 @@ Follow the restart instructions, then sign in under **Settings → Codex**. Both
 After signing in and selecting a Codex model in Web, install the same plugin in the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-codex-subscription@3.1.6
+dsh plugin --profile headless add dsh-codex-subscription@3.2.1
 dsh --profile headless "Reply with only the word: ok"
 ```
 
@@ -115,9 +119,16 @@ Open **Settings → Codex** to manage accounts and preferences. Screenshots and 
 </details>
 
 <details>
+<summary>Model settings: defaults, input predictions and answer style</summary>
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-models-en-dark.png"><img src="docs/assets/ui-models-en-light.png" width="640" alt="Model settings with Restore DSH default and detailed help on hover"></picture></p>
+
+</details>
+
+<details>
 <summary>Composer: models, speed, permissions and quota</summary>
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-composer-en-dark.png"><img src="docs/assets/ui-composer-en-light.png" width="760" alt="Composer: permission, sketch, remaining quota, the lightning mark for Fast mode and the model picker"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-composer-en-dark.png"><img src="docs/assets/ui-composer-en-light.png" width="760" alt="Composer: workspace permission, remaining quota and model selection"></picture></p>
 
 </details>
 
@@ -136,10 +147,12 @@ Open **Settings → Codex** to manage accounts and preferences. Screenshots and 
 | Settings tab | What it controls |
 | --- | --- |
 | **Start** | Sign-in and accounts, a switch for every feature, subscription quota, quota display and alerts |
-| **Models** | Default model and model list, answer style; the folded Advanced group has context length, retry, connection mode, cloud compaction and the review model |
+| **Models** | Default model, default reasoning effort and model list, answer style; the folded Advanced group has context length, retry, connection mode, cloud compaction and the review model |
 | **Web & tools** | The master switch for other models, search source, ChatGPT connectors, official Codex subtasks |
 | **Create** | Image generation, editing, @image in the composer, image viewer, sketch board and agent drawing |
 | **Phone & more** | Phone remote control, experimental voice calls, local cache, support diagnostics |
+
+Voice conversation is off by default. Enable it under **Phone & more**, then start a call from the composer. If a native window, including Linux, does not support WebRTC, DSH offers to continue the same conversation in a browser. Voice samples remain available, and your existing subscription is used without an API key.
 
 **Model-aware context** follows your account's model directory; refreshing preserves your unsaved draft. Quota groups use backend-provided values, including separate buckets such as Spark.
 
@@ -239,9 +252,7 @@ This is a third-party compatibility layer using OpenAI's remote connection servi
 <details>
 <summary>Pairing settings and paired phones</summary>
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-remote-en-dark.png"><img src="docs/assets/ui-remote-en-light.png" width="560" alt="Phone remote control in settings: the switch, pairing QR code and manual code, paired phones"></picture></p>
-
-<p align="center"><sub>The screenshot’s QR code hides a little Easter egg. To pair your phone, use the code generated in DSH settings.</sub></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-remote-en-dark.png"><img src="docs/assets/ui-remote-en-light.png" width="560" alt="Phone remote control in settings: the switch, connection status, pairing QR code and manual code"></picture></p>
 
 </details>
 
@@ -256,9 +267,10 @@ Model access and quota depend on your account.
 | Feature | What you can do | Availability / setup |
 | --- | --- | --- |
 | **Subscription sign-in** | Sign in to ChatGPT and use Codex subscription models without an API key | Normal chat needs no Codex CLI |
-| **Model catalog sync** | Read available models and reasoning levels from your account, with manual refresh; models marked for retirement show their retirement date next to the model name, without automatically switching your selection | New models appear when your account offers them; the account catalog is the only source, so signed out or when it cannot be read no models are shown and no bundled list stands in |
+| **Model catalog sync** | Read available models and reasoning levels from your account, with manual refresh; the last successful catalog is stored locally per account and remains available during the background refresh after restart, with a 24-hour lifetime; models marked for retirement show their retirement date next to the model name, without automatically switching your selection | New models appear when your account offers them; the account catalog is the only source, so no models are shown when signed out or when neither a remote read nor a valid cache is available |
 | **Model list** | Show or hide individual models in the composer picker on the Models page; the picker keeps DSH's own model labels (such as the new-model badge) | Display only; selected models and requests still work |
 | **Default model** | Choose the model a new conversation opens with on the Models page | Writes the DSH default model setting, the same one a model switch inside a chat writes; unset it to follow the DSH default |
+| **Default reasoning effort** | Choose a default level for subscription models on the Models page; Model default follows each model's official catalog recommendation | Manual choices take priority. Unsupported levels fall back to the model's valid default; existing manual conversation choices are preserved |
 | **Reasoning levels** | Choose supported reasoning effort in the composer | Levels vary by model |
 | **Speed tiers** | Switch supported models between Standard and Fast; Ultrafast (Beta) too when the account catalog offers it, with a lightning indicator | Standard by default; Fast and Ultrafast increase usage, and Ultrafast is Pro 500 only today |
 | **Response verbosity** | Request short, medium, or detailed responses | Follows the model default unless changed |
@@ -284,7 +296,7 @@ Model access and quota depend on your account.
 | **Usage overview** | In the quota card, see lifetime tokens, busiest day, streaks, most used reasoning level and a half-year daily heatmap | From the official usage statistics; hidden when the account has none |
 | **Credits and reset cards** | View extra Credits, spending caps, and available reset cards | Shown when returned for your account |
 | **Composer quota** | See remaining quota as a percentage or progress bar while chatting | Off by default; choose your display mode |
-| **Runway estimate** | Estimate remaining time from recent usage | Beta; optional estimate, not a guarantee |
+| **Runway estimate** | Hover over or click the composer quota to see when recent usage would exhaust it | Beta; optional estimate, not a guarantee |
 | **Quota alerts** | Use fixed, early, or custom short / long-window thresholds | 20% remaining by default; can be disabled |
 | **Redeem reset cards** | Use an available reset card after confirmation | Confirmation and waiting safeguards; server decides the result |
 | **Retry after reset** | Wait for a confirmed short-window reset before continuing | Off by default; waiting can be stopped |
@@ -355,7 +367,7 @@ Find this plugin on the DSH **Plugins** page and use its update or uninstall act
 <summary>Terminal commands</summary>
 
 ```sh
-dsh plugin --profile web update dsh-codex-subscription@3.1.6
+dsh plugin --profile web update dsh-codex-subscription@3.2.1
 ```
 
 Run only when you want to uninstall:

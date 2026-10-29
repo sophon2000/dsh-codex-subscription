@@ -112,14 +112,17 @@ test('custom context rows follow the active upstream model catalog', () => {
   ])
 })
 
-function fakeContext({ connection = true, webServer = true } = {}) {
+function fakeContext({ connection = true, webServer = true, fetchRouting = true } = {}) {
   const registered = []
+  const disposedAdapters = []
   const handled = []
   const listeners = []
   const searchProviders = []
   const tools = []
   const settings = []
   const webUpdates = []
+  const disposers = new Map()
+  const pendingEffects = []
   const provided = new Map()
   const preference = { autoQuotaRetry: false, quickQuotaVisible: false, searchProvider: SEARCH_PROVIDER_AUTO, outputVerbosity: OUTPUT_VERBOSITY_DEFAULT, streamIdleTimeoutMinutes: 10, speedMode: SPEED_MODE_STANDARD, contextMode: CONTEXT_MODE_STANDARD, customContextWindow: 272_000, customContextGpt54: 1_000_000, customContextGpt54Mini: 400_000, customContextGpt55: 1_000_000, customContextGpt56: 1_000_000 }
   let credential
@@ -137,6 +140,7 @@ function fakeContext({ connection = true, webServer = true } = {}) {
     },
   }
   const searchProviderMap = new Map([['deepseek-official', { id: 'deepseek-official', available: () => true, async search() { return { sources: [], truncated: false } } }]])
+  const fetchProviderMap = new Map([['local', { id: 'local', available: () => true, async fetch(request) { return { native: true, url: request.url } } }]])
   const updateSettings = async patch => {
     Object.assign(preference, patch)
     await Promise.all(listeners.filter(entry => entry.event === 'loader/volatile-update').map(entry => entry.listener()))
@@ -158,7 +162,7 @@ function fakeContext({ connection = true, webServer = true } = {}) {
     llm: {
       registerAdapter(providers, adapter) {
         registered.push({ providers, adapter })
-        return () => {}
+        return () => { disposedAdapters.push(adapter) }
       },
     },
     attachments: {
@@ -177,6 +181,8 @@ function fakeContext({ connection = true, webServer = true } = {}) {
     },
     web: {
       searchProviders: searchProviderMap,
+      fetchProviders: fetchProviderMap,
+      registerFetchProvider(provider) { fetchProviderMap.set(provider.id, provider); return () => fetchProviderMap.delete(provider.id) },
       registerSearchProvider(provider) {
         searchProviders.push(provider)
         searchProviderMap.set(provider.id, provider)
@@ -220,10 +226,23 @@ function fakeContext({ connection = true, webServer = true } = {}) {
     },
     get(name) { return provided.get(name) },
     provide(name, value) { provided.set(name, value) },
-    effect(register) { return register() },
+    effect(register, label) {
+      const result = register()
+      if (result && typeof result.then === 'function') {
+        const pending = Promise.resolve(result).then(dispose => {
+          if (typeof dispose === 'function') disposers.set(label, dispose)
+        })
+        pendingEffects.push(pending)
+        return pending
+      }
+      if (typeof result === 'function') disposers.set(label, result)
+      return result
+    },
   }
+  if (!fetchRouting) Object.defineProperty(ctx.web, 'fetchProviders', { get: () => fetchProviderMap })
   return {
-    ctx, config: preference, registered, handled, listeners, provided, searchProviders, settings, tools, webUpdates,
+    ctx, config: preference, registered, disposedAdapters, handled, listeners, provided, searchProviders, settings, tools, webUpdates, disposers, fetchProviderMap,
+    async settleEffects() { await Promise.all(pendingEffects) },
     async request(endpoint, payload, signal) {
       const method = 'codex-subscription/' + endpoint
       const route = handled.find(route => route.path === '/api/' + method)
@@ -271,17 +290,92 @@ test('account routes register without directly accessing the web server', () => 
   assert.equal(host.tools.length, 1)
 })
 
-test('plugin activates without the web connection service in Headless mode', () => {
+test('optional Codex fetch reports live routing support, fails closed signed out, and unload restores the native registry', async () => {
+  const host = fakeContext()
+  const original = host.ctx.web.fetchProviders
+  applyPlugin(host.ctx, host.config)
+  const signal = new AbortController().signal
+  assert.equal((await host.request('preferences/status', {}, signal)).value.fetchRoutingAvailable, true)
+  assert.equal((await host.request('preferences/status', {}, signal)).value.fetchProvider, 'dsh')
+  assert.equal((await host.request('preferences/update', { fetchProvider: 'codex' }, signal)).ok, true)
+  await assert.rejects(host.ctx.web.fetchProviders.get('local').fetch({ url: 'https://example.com/' }, signal), error => error.code === 'WEB_PROVIDER_CREDENTIAL_MISSING')
+  assert.deepEqual(host.webUpdates, [], 'does not rewrite the native provider')
+  host.disposers.get('codex-subscription: fetch router')()
+  assert.equal(host.ctx.web.fetchProviders, original)
+  assert.equal((await original.get('local').fetch({ url: 'https://example.com/' })).native, true)
+})
+
+test('unsupported hosts reject Codex fetch preferences before persisting them', async () => {
+  const host = fakeContext({ fetchRouting: false })
+  applyPlugin(host.ctx, host.config)
+  const signal = new AbortController().signal
+  const status = await host.request('preferences/status', {}, signal)
+  assert.equal(status.value.fetchRoutingAvailable, false)
+  const result = await host.request('preferences/update', { fetchProvider: 'codex' }, signal)
+  assert.equal(result.ok, false)
+  assert.notEqual(host.config.fetchProvider, 'codex')
+  assert.equal(host.ctx.web.fetchProviders, host.fetchProviderMap)
+})
+
+test('a saved Codex fetch choice on an unsupported host fails activation instead of silently keeping native dispatch', () => {
+  const host = fakeContext({ fetchRouting: false })
+  host.config.fetchProvider = 'codex'
+  assert.throws(() => applyPlugin(host.ctx, host.config), /Configured Codex webpage reading could not be activated/)
+})
+
+test('unloading stops retained Codex handles even when a later registry wrapper must be preserved', async () => {
+  const host = fakeContext()
+  applyPlugin(host.ctx, host.config)
+  await host.updateSettings({ fetchProvider: 'codex' })
+  const router = host.ctx.web.fetchProviders
+  const retained = router.get('local')
+  const outer = new Proxy(router, {})
+  host.ctx.web.fetchProviders = outer
+  host.disposers.get('codex-subscription: fetch router')()
+  assert.equal(host.ctx.web.fetchProviders, outer, 'do not overwrite the later owner')
+  assert.equal((await outer.get('local').fetch({ url: 'https://example.com/' })).native, true)
+  assert.throws(() => retained.fetch({ url: 'https://example.com/' }), error => error.code === 'WEB_PROVIDER_UNAVAILABLE')
+  await assert.rejects(host.fetchProviderMap.get('codex-subscription-fetch').fetch({ url: 'https://example.com/' }), error => error.code === 'WEB_PROVIDER_UNAVAILABLE')
+})
+
+test('plugin activates without the web connection service in Headless mode', async () => {
   const host = fakeContext({ connection: false })
 
   assert.doesNotThrow(() => applyPlugin(host.ctx, host.config))
+  await host.settleEffects()
   assert.deepEqual(host.registered.map(item => item.providers), [['openai-codex']])
   assert.equal(host.handled.length, 0)
+})
+
+test('a credential read failure does not prevent adapter registration', async () => {
+  const host = fakeContext()
+  host.ctx.credentials.resolve = async () => { throw new Error('credential store unavailable') }
+  applyPlugin(host.ctx, host.config)
+  await host.settleEffects()
+  assert.deepEqual(host.registered.map(item => item.providers), [['openai-codex']])
+})
+
+test('adapter is registered immediately and disposal cannot wait for or register after a stuck vault read', async () => {
+  const host = fakeContext()
+  let release
+  const vault = new Promise(resolve => { release = resolve })
+  host.ctx.credentials.resolve = () => vault
+  applyPlugin(host.ctx, host.config)
+  assert.equal(host.registered.length, 1, 'no provider-missing startup window')
+  await new Promise(resolve => setImmediate(resolve))
+  const result = host.disposers.get('codex-subscription: official model catalog')()
+  assert.equal(result, undefined, 'disposal does not await asynchronous initialization')
+  assert.equal(host.disposedAdapters.length, 1)
+  await assert.rejects(host.registered[0].adapter.resolveModel('openai-codex', 'gpt-6-luna'), error => error.name === 'AbortError')
+  release(undefined)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(host.registered.length, 1, 'late initialization cannot register an adapter again')
 })
 
 test('signed out, the account advertises no models and model metadata needs no credentials', async () => {
   const host = fakeContext()
   applyPlugin(host.ctx, host.config)
+  await host.settleEffects()
   // DSH 0.2.1-alpha.3 and later resolve the route's key while listing models, so signed out must answer
   // "no credential" (an empty list) rather than an authorization failure.
   host.ctx.credentials.resolve = async () => undefined
@@ -293,6 +387,7 @@ test('signed out, the account advertises no models and model metadata needs no c
 test('hiding a model only changes the saved display list, not what the adapter advertises', async () => {
   const host = fakeContext()
   applyPlugin(host.ctx, host.config)
+  await host.settleEffects()
   const adapter = host.registered[0].adapter
   const signal = new AbortController().signal
   const updated = await host.request('preferences/update', { [DISABLED_MODELS_FIELD]: ['gpt-5.5'] }, signal)
@@ -306,6 +401,7 @@ test('hiding a model only changes the saved display list, not what the adapter a
 test('plugin registers one Codex route, subscription image tool, and DSH-trusted redacted RPC', async () => {
   const host = fakeContext()
   applyPlugin(host.ctx, host.config)
+  await host.settleEffects()
 
   assert.equal('CODEX_PROVIDER_POLICY' in plugin, false, 'do not replace the removed boundary with cosmetic metadata')
   assert.deepEqual(host.registered.map(item => item.providers), [['openai-codex']])
@@ -403,7 +499,7 @@ test('plugin registers one Codex route, subscription image tool, and DSH-trusted
   assert.equal(typeof preferenceStatus.value.subagentRuntimeInstalled, 'boolean')
   assert.deepEqual(preferenceStatus, {
     ok: true,
-    value: { disabledModels: [], autoQuotaRetry: false, compactionMode: 'dsh', reasoningCache: 'on', connectionMode: 'sse', connectors: 'off', reviewModel: 'session', remoteControl: 'off', otherModels: 'on', subagentBackend: 'dsh', subagentBackendAvailable: false, subagentRuntimeInstalled: preferenceStatus.value.subagentRuntimeInstalled, ...IMAGE_FEATURE_DEFAULTS, reasoningSummary: 'auto', voiceCall: 'off', voiceVoice: 'cove', voiceLanguage: 'auto', retryPolicy: 'default', imageModel: 'gpt-image-2', imageQuality: 'auto', quickQuotaMode: QUICK_QUOTA_MODE_PERCENT, searchProvider: 'codex', speedMode: SPEED_MODE_STANDARD, outputVerbosity: OUTPUT_VERBOSITY_DEFAULT, inputImageDetail: 'auto', streamIdleTimeoutMinutes: 10, contextMode: CONTEXT_MODE_STANDARD, customContextWindow: 272_000, customContextGpt54: 1_000_000, customContextGpt54Mini: 400_000, customContextGpt55: 272_000, customContextGpt56: 872_000, customContextGpt6Astra: 272_000, contextModels: activeContextModels, availableModels: preferenceStatus.value.availableModels, verbosityModels, fastModels: preferenceStatus.value.fastModels, ultrafastModels: preferenceStatus.value.ultrafastModels, catalogStatus: preferenceStatus.value.catalogStatus, customContextModels: {}, searchMode: 'live', searchDomains: [], quotaAlerts: 'important', quotaShortThreshold: 20, quotaLongThreshold: 20, writable: true },
+    value: { disabledModels: [], autoQuotaRetry: false, compactionMode: 'dsh', reasoningCache: 'on', defaultReasoningEffort: 'auto', connectionMode: 'sse', connectors: 'off', reviewModel: 'session', remoteControl: 'off', composerPredictions: 'off', otherModels: 'on', subagentBackend: 'dsh', subagentBackendAvailable: false, subagentRuntimeInstalled: preferenceStatus.value.subagentRuntimeInstalled, ...IMAGE_FEATURE_DEFAULTS, reasoningSummary: 'auto', voiceCall: 'off', voiceVoice: 'cove', voiceLanguage: 'auto', retryPolicy: 'default', imageModel: 'gpt-image-2', imageQuality: 'auto', quickQuotaMode: QUICK_QUOTA_MODE_PERCENT, searchProvider: 'codex', fetchProvider: 'dsh', fetchRoutingAvailable: true, speedMode: SPEED_MODE_STANDARD, outputVerbosity: OUTPUT_VERBOSITY_DEFAULT, inputImageDetail: 'auto', streamIdleTimeoutMinutes: 10, contextMode: CONTEXT_MODE_STANDARD, customContextWindow: 272_000, customContextGpt54: 1_000_000, customContextGpt54Mini: 400_000, customContextGpt55: 272_000, customContextGpt56: 872_000, customContextGpt6Astra: 272_000, contextModels: activeContextModels, availableModels: preferenceStatus.value.availableModels, verbosityModels, fastModels: preferenceStatus.value.fastModels, ultrafastModels: preferenceStatus.value.ultrafastModels, ultraModels: preferenceStatus.value.ultraModels, catalogStatus: preferenceStatus.value.catalogStatus, customContextModels: {}, searchMode: 'live', searchDomains: [], quotaAlerts: 'important', quotaShortThreshold: 20, quotaLongThreshold: 20, writable: true },
   })
   const preferenceUpdate = await host.request('preferences/update', {
     [AUTO_QUOTA_RETRY_FIELD]: false,
@@ -418,7 +514,7 @@ test('plugin registers one Codex route, subscription image tool, and DSH-trusted
   }, signal)
   assert.deepEqual(preferenceUpdate, {
     ok: true,
-    value: { disabledModels: [], autoQuotaRetry: false, compactionMode: 'dsh', reasoningCache: 'on', connectionMode: 'sse', connectors: 'off', reviewModel: 'session', remoteControl: 'off', otherModels: 'on', subagentBackend: 'dsh', subagentBackendAvailable: false, subagentRuntimeInstalled: preferenceStatus.value.subagentRuntimeInstalled, ...IMAGE_FEATURE_DEFAULTS, reasoningSummary: 'auto', voiceCall: 'off', voiceVoice: 'cove', voiceLanguage: 'auto', retryPolicy: 'default', imageModel: 'gpt-image-2', imageQuality: 'auto', quickQuotaMode: QUICK_QUOTA_MODE_BAR, searchProvider: 'dsh', speedMode: SPEED_MODE_FAST, outputVerbosity: OUTPUT_VERBOSITY_DEFAULT, inputImageDetail: 'high', streamIdleTimeoutMinutes: 5, contextMode: CONTEXT_MODE_EXTENDED, customContextWindow: 500_000, customContextGpt54: 1_000_000, customContextGpt54Mini: 400_000, customContextGpt55: 272_000, customContextGpt56: 872_000, customContextGpt6Astra: 272_000, contextModels: activeContextModels, availableModels: preferenceStatus.value.availableModels, verbosityModels, fastModels: preferenceStatus.value.fastModels, ultrafastModels: preferenceStatus.value.ultrafastModels, catalogStatus: preferenceStatus.value.catalogStatus, customContextModels: {}, searchMode: 'live', searchDomains: [], quotaAlerts: 'important', quotaShortThreshold: 20, quotaLongThreshold: 20, writable: true },
+    value: { disabledModels: [], autoQuotaRetry: false, compactionMode: 'dsh', reasoningCache: 'on', defaultReasoningEffort: 'auto', connectionMode: 'sse', connectors: 'off', reviewModel: 'session', remoteControl: 'off', composerPredictions: 'off', otherModels: 'on', subagentBackend: 'dsh', subagentBackendAvailable: false, subagentRuntimeInstalled: preferenceStatus.value.subagentRuntimeInstalled, ...IMAGE_FEATURE_DEFAULTS, reasoningSummary: 'auto', voiceCall: 'off', voiceVoice: 'cove', voiceLanguage: 'auto', retryPolicy: 'default', imageModel: 'gpt-image-2', imageQuality: 'auto', quickQuotaMode: QUICK_QUOTA_MODE_BAR, searchProvider: 'dsh', fetchProvider: 'dsh', fetchRoutingAvailable: true, speedMode: SPEED_MODE_FAST, outputVerbosity: OUTPUT_VERBOSITY_DEFAULT, inputImageDetail: 'high', streamIdleTimeoutMinutes: 5, contextMode: CONTEXT_MODE_EXTENDED, customContextWindow: 500_000, customContextGpt54: 1_000_000, customContextGpt54Mini: 400_000, customContextGpt55: 272_000, customContextGpt56: 872_000, customContextGpt6Astra: 272_000, contextModels: activeContextModels, availableModels: preferenceStatus.value.availableModels, verbosityModels, fastModels: preferenceStatus.value.fastModels, ultrafastModels: preferenceStatus.value.ultrafastModels, ultraModels: preferenceStatus.value.ultraModels, catalogStatus: preferenceStatus.value.catalogStatus, customContextModels: {}, searchMode: 'live', searchDomains: [], quotaAlerts: 'important', quotaShortThreshold: 20, quotaLongThreshold: 20, writable: true },
   })
   assert.equal(host.registered[0].adapter.current().profiles.get('openai-codex').streamIdleTimeoutMs, 5 * 60 * 1000)
   await host.request('preferences/update', { [STREAM_IDLE_TIMEOUT_MINUTES_FIELD]: 10 }, signal)
@@ -521,7 +617,7 @@ test('preferences/models refreshes the catalog before returning the current mode
   const signal = new AbortController().signal
   assert.deepEqual(await handler('preferences/models', {}, signal), {
     ok: true,
-    value: { availableModels: [], contextModels: [{ key: 'gpt-6-astra' }], verbosityModels: ['gpt-6-astra'], fastModels: [], ultrafastModels: [], catalogStatus: undefined },
+    value: { availableModels: [], contextModels: [{ key: 'gpt-6-astra' }], verbosityModels: ['gpt-6-astra'], fastModels: [], ultrafastModels: [], ultraModels: [], catalogStatus: undefined },
   })
   assert.deepEqual(calls, ['refresh', 'status'])
 
@@ -653,7 +749,7 @@ test('quota reset RPC bounds host failures and logout invalidates pending challe
 test('diagnostics converts credential failures to a fixed public issue without leaking host errors', async () => {
   const report = await plugin.createSubscriptionDiagnostics({
     auth: { async status() { throw new Error('refresh-secret account-local') } },
-    preferences: { status: () => ({ quickQuotaVisible: false, searchProvider: 'dsh', speedMode: 'standard', writable: true }) },
+    preferences: { status: () => ({ quickQuotaVisible: false, searchProvider: 'dsh', fetchProvider: 'dsh', fetchRoutingAvailable: true, speedMode: 'standard', writable: true }) },
   })
 
   assert.deepEqual(report.account, { status: 'unknown' })
@@ -664,7 +760,7 @@ test('diagnostics converts credential failures to a fixed public issue without l
 test('diagnostics includes bounded request failures and excludes proxy or credential details', async () => {
   const report = await plugin.createSubscriptionDiagnostics({
     auth: { async status() { return { authenticated: false } } },
-    preferences: { status: () => ({ contextMode: 'standard', quickQuotaMode: 'off', searchProvider: 'dsh', speedMode: 'standard', writable: true, ignored: 'noise' }) },
+    preferences: { status: () => ({ contextMode: 'standard', quickQuotaMode: 'off', searchProvider: 'dsh', fetchProvider: 'dsh', fetchRoutingAvailable: true, speedMode: 'standard', writable: true, ignored: 'noise' }) },
     network: { snapshot: () => ({ login: { status: 'failed', stage: 'transport', code: 'dns', route: 'environment', elapsed: '1-5s' } }) },
   })
   assert.deepEqual(report.requests, { login: { status: 'failed', stage: 'transport', code: 'dns', route: 'environment', elapsed: '1-5s' } })

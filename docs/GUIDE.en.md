@@ -32,7 +32,9 @@ When the official model catalog exposes GPT-6 Astra, Standard preserves the cata
 
 ### Default model
 
-Choose the model a new conversation opens with under **Settings → Codex subscription → Models → Default model**. It writes DSH's own default-model setting, the same one a model switch inside a chat writes: every conversation created afterwards uses it, and switching to another model in a chat (including a non-subscription one) is reflected here as **Follow DSH default**. The control is unavailable for models the catalog does not offer, while signed out, or with an empty catalog.
+Choose the model a new conversation opens with under **Settings → Codex subscription → Models → Default model**. It writes DSH's own default-model setting, the same one a model switch inside a chat writes: every conversation created afterwards uses it, and switching to another model in a chat (including a non-subscription one) is reflected here as **Follow DSH default**.
+
+Choose **Restore DSH default** in the menu to clear the saved selection in this profile and use its inherited default. Existing conversations are unchanged; this does not recover a personal selection that was previously overwritten. Restoration remains available without a model catalog when the native DSH configuration editor supports it; unsupported hosts disable the action.
 
 ### Composer quota
 
@@ -101,6 +103,16 @@ The board supports editable shapes and text, native curves, and a side control f
 
 Flare / Sunburst request overrides remain experimental: successful generation does not confirm which image engine or quality the subscription backend used.
 
+### Input predictions (Beta)
+
+Enable **Input predictions** under **Settings → Codex subscription → Models**; it is off by default. GPT-6 Astra, GPT-6.1 Sol and GPT-6.1 Terra are supported, subject to the account's official prediction capability check.
+
+After a completed reply, an empty draft can receive a suggested next message based on the current conversation text. Focus the composer to see the grey suggestion; Tab inserts it as an editable, undoable draft without sending. Briefly losing focus preserves the same request and result. Editing the draft, switching conversations or accounts, or disabling predictions invalidates the old suggestion. The model may return no suggestion.
+
+If you undo or clear an accepted draft without sending, the empty composer shows the same cached suggestion without another model request. Only one suggestion for the current context is retained, for up to five minutes; changing models, conversations, accounts or turns invalidates it.
+
+[OpenAI states](https://learn.chatgpt.com/docs/features/composer-predictions) that generating predictions in official Codex does not count toward usage limits or consume credits; sending an accepted prediction is metered normally. DSH makes additional prediction requests, and the same exemption for this third-party integration is unconfirmed, so the plugin does not promise free predictions. Predictions neither retrieve other conversations nor run tools.
+
 ### Composer speed
 
 With a supported Codex model selected, open the composer's model menu to choose Standard or Fast.
@@ -109,7 +121,15 @@ see the [OpenAI Codex Speed documentation](https://learn.chatgpt.com/docs/agent-
 
 **Ultrafast (Beta).** A model's speed menu gains "Ultrafast" only when the current account's catalog lists an `ultrafast` tier for that model (at the developer event: GPT-6 Astra on Pro 500 only). If you chose Ultrafast and switch to a model without it, requests go out on the standard tier; the plugin never substitutes Fast for you. It is the fastest tier and uses allowance and Credits faster. It stays Beta because it has not been run on a Pro 500 account yet.
 
-**The `ultra` reasoning level in the catalog.** Some models (for example GPT-6-Astra and GPT-6.1-Sol) list an `ultra` reasoning level, but DSH's reasoning table currently has only off, minimal, low, medium, high, xhigh and max, so the composer cannot select it, and the plugin does not remap it to another level. Codex subtasks can request `ultra` from the chat. Diagnostics under Settings → Maintenance lists it as a catalog capability that is not adapted yet, which does not mean the model is unavailable.
+### Ultra proactive delegation
+
+Starting with plugin **3.1.9**, supported models offer **Ultra** in the composer's reasoning-effort menu. You can also choose it under **Settings → Codex subscription → Models → Default reasoning effort**. Availability depends on the current account's model catalog, the host's native session-record and tool-policy services, and a usable native subagent tool in the selected Agent preset. The option is hidden when these requirements are not met. With Ultra selected as the default, unsupported models still use their own default reasoning effort.
+
+Ultra is a **DSH proactive delegation preset**: it uses the native reasoning effort resolved from the account's model catalog and guides the model to delegate suitable independent work to native subagents. Real-account acceptance for GPT-6.1-Sol used `xhigh`; the effective effort depends on the catalog, and the literal value `ultra` is never sent as `reasoning.effort`. Simple tasks can still run directly, so selecting Ultra does not guarantee a subagent on every request. Additional subtasks can increase usage and completion time.
+
+Subagents retain DSH's existing approvals, sandbox, concurrency and depth limits, and cancellation controls. Ultra grants no additional permissions and does not install components or change Agent presets automatically. Switching to an ordinary effort removes the Ultra delegation policy from subsequent requests; restoring a session rechecks capabilities and the current request's permissions.
+
+**Acceptance coverage:** real-account tests on the full DSH **0.2.1-rc.3** host verified GPT-6.1-Sol completing a native subtask, cancellation, restoring Ultra and switching back to High. Selecting Ultra in the iPhone menu has not yet been confirmed on the device. This is a DSH execution preset, not a claim to reproduce the official client's entire orchestration.
 
 ### Phone remote control (Beta)
 

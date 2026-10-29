@@ -6,7 +6,7 @@ import { capabilityCoverage } from './diagnostic-capabilities.js'
 import { safeOperations } from './diagnostic-operations.js'
 import { diagnosticLog } from './diagnostic-log.js'
 
-const requestAreas = new Set(['login', 'model', 'catalog', 'quota', 'quota-reset', 'search', 'image'])
+const requestAreas = new Set(['login', 'model', 'catalog', 'quota', 'quota-reset', 'search', 'image', 'voice'])
 const statuses = new Set(['ok', 'failed'])
 const stages = new Set(['transport', 'http'])
 const codes = new Set(['timeout', 'dns', 'tls', 'connection', 'network', 'http-error'])
@@ -130,7 +130,7 @@ export async function createSubscriptionDiagnostics({ auth, preferences, login =
     ...(collected.compaction ? { compaction: collected.compaction } : {}),
     ...(collected.review ? { review: collected.review } : {}),
     ...(collected.streamFailure ? { streamFailure: collected.streamFailure } : {}),
-    ...(catalog && ['unavailable', 'online'].includes(catalog.source)
+    ...(catalog && ['unavailable', 'cached', 'online'].includes(catalog.source)
       && ['idle', 'refreshing', 'ok', 'failed'].includes(catalog.refresh)
       ? { catalog: { source: catalog.source, refresh: catalog.refresh, ...(gaps.length ? { unsupported: gaps } : {}) } } : {}),
     configuration: {

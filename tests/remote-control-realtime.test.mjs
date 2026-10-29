@@ -30,6 +30,28 @@ const setup = (overrides = {}) => {
 const start = { threadId: 't1', transport: { type: 'existingCall', callId: 'rtc_abc' }, realtimeSessionId: 'S1', version: 'v3', realtimeStartInstructions: 'Use prefixes.' }
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
+test('stopping a pending voice join cannot revive it after a later call has started', async () => {
+  const {voice,notify}=setup()
+  class DelayedSocket extends FakeSocket { arrive() {} }
+  const pendingVoice=createRealtimeVoice({WebSocket:DelayedSocket,credentials:async()=>({access:'test',accountId:'test'}),userAgent:'test',delegate:async()=>{}})
+  const pending=pendingVoice.start(start,notify)
+  await settle()
+  assert.equal(pendingVoice.stop('t1'),true)
+  await assert.rejects(pending)
+  assert.equal(pendingVoice.active('t1'),false)
+  pendingVoice.closeAll();voice.closeAll()
+})
+
+test('aborting the caller cancels an in-flight sideband without leaving an active session', async () => {
+  class DelayedSocket extends FakeSocket { arrive() {} }
+  const voice=createRealtimeVoice({WebSocket:DelayedSocket,credentials:async()=>({access:'test',accountId:'test'}),userAgent:'test',delegate:async()=>{}})
+  const abort=new AbortController(),opening=voice.start(start,async()=>{}, {signal:abort.signal})
+  await settle();abort.abort()
+  await assert.rejects(opening)
+  assert.equal(voice.active('t1'),false)
+  voice.closeAll()
+})
+
 test('joining an existing call: the side channel opens on the call id and the phone is told', async () => {
   const { voice, notes, notify } = setup()
   assert.deepEqual(await voice.start(start, notify), {})
@@ -39,6 +61,28 @@ test('joining an existing call: the side channel opens on the call id and the ph
   assert.equal(socket.options.headers['chatgpt-account-id'], 'acct')
   assert.deepEqual(notes.map(note => note.method), ['thread/realtime/started'])
   assert.deepEqual(notes[0].params, { threadId: 't1', version: 'v3', realtimeSessionId: 'S1' })
+})
+
+test('input readiness requires a nonempty audio frame, stays private, and resets for each voice session', async () => {
+  const { voice, notify, notes, delegated } = setup()
+  await voice.start(start, notify)
+  const first = FakeSocket.instances[0]
+  assert.equal(voice.status('t1').inputReady, false)
+  for (const audio of ['', null, 0, []]) first.hear({ type: 'session.input_audio.append', audio })
+  first.hear({ type: 'session.output_audio.delta', audio: 'synthetic-audio' })
+  assert.equal(voice.status('t1').inputReady, false)
+  first.hear({ type: 'session.input_audio.append', audio: 'synthetic-audio' })
+  assert.equal(voice.status('t1').inputReady, true)
+  first.hear({ type: 'session.input_audio.append', audio: '' })
+  assert.equal(voice.status('t1').inputReady, true)
+  assert.equal(delegated.length, 0)
+  assert.deepEqual(notes.map(note => note.method), ['thread/realtime/started'])
+  voice.stop('t1')
+  assert.deepEqual(voice.status('t1'), { active: false, working: false, closing: false, lines: [] })
+  await voice.start(start, notify)
+  first.hear({ type: 'session.input_audio.append', audio: 'late-old-frame' })
+  assert.equal(voice.status('t1').inputReady, false)
+  voice.stop('t1')
 })
 
 test('a spoken choice resolves the running DSH question without queuing behind that same turn', async () => {

@@ -39,15 +39,17 @@
 
 让 DeepSeek 等任意 DSH 模型使用你在 ChatGPT 里连接的应用：GitHub、Gmail、Google 云端硬盘、日历等。模型先搜索再调用，写操作默认每次都要你批准，也可以在设置里改成不再询问。默认关闭，在“联网与工具”里开启。
 
-联网搜索来源、ChatGPT 连接器和官方 Codex 子任务在 **设置 → Codex 订阅 → 联网与工具**，页首一个总开关：关闭后，用 DeepSeek 等非 Codex 模型对话时不再使用订阅的联网搜索（改用 DSH 搜索）、图片生成和 ChatGPT 连接器，Codex 订阅模型不受影响。默认开启。
+联网搜索与网页读取来源、ChatGPT 连接器和官方 Codex 独立子任务在 **设置 → Codex 订阅 → 联网与工具**，页首一个总开关：关闭后，用 DeepSeek 等非 Codex 模型对话时不再使用订阅的联网搜索（改用 DSH 搜索）、图片生成和 ChatGPT 连接器，Codex 订阅模型不受影响。默认开启。
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-interop-zh-dark.webp"><img src="docs/assets/ui-interop-zh-light.webp" width="640" alt="联网与工具设置页"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-interop-zh-dark.webp"><img src="docs/assets/ui-interop-zh-light.webp" width="640" alt="联网与工具设置页：分别选择搜索和网页读取来源、连接器权限与独立子任务"></picture></p>
 
 </details>
 
 ## 准备 DSH
 
-已验证兼容 DSH `0.2.1-rc.3`（`next` 通道），继续支持 `0.2.1-rc.2`，最低支持 `0.1.7-rc.2`；更早的 DSH 请先升级。
+已验证兼容 DSH `0.2.1-rc.4`（`next` 通道），继续支持 `0.2.1-rc.3` 和 `0.2.1-rc.2`，最低支持 `0.1.7-rc.2`；更早的 DSH 请先升级。
+
+另支持预览宿主 `0.2.2-alpha.2`；范围与验收边界见[兼容性记录](docs/dsh-022-alpha2-compatibility.md)。
 
 本插件支持软件包元数据中记录的最新版 DeepSeek Harness，并需要一个当前具有 Codex 使用资格的 ChatGPT 账户。
 
@@ -70,7 +72,7 @@
 2. 在 **包名或地址** 输入框中粘贴下面的包名（已带版本号）：
 
    ```text
-   dsh-codex-subscription@3.1.6
+   dsh-codex-subscription@3.2.1
    ```
 
 3. 点击 **安装**，等待安装完成；按页面提示操作，需要重启时先保存工作。
@@ -87,7 +89,7 @@
 <summary>终端安装（已能运行 dsh 命令）</summary>
 
 ```sh
-dsh plugin --profile web add dsh-codex-subscription@3.1.6
+dsh plugin --profile web add dsh-codex-subscription@3.2.1
 ```
 
 安装完成后按提示重启 DSH，再到 **设置 → Codex 订阅** 登录。插件页面和终端均由 DSH 管理安装。
@@ -100,7 +102,7 @@ dsh plugin --profile web add dsh-codex-subscription@3.1.6
 先在 Web 中完成登录并选择一次 Codex 模型，再把同一个插件安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-codex-subscription@3.1.6
+dsh plugin --profile headless add dsh-codex-subscription@3.2.1
 dsh --profile headless "只回复：ok"
 ```
 
@@ -117,9 +119,16 @@ dsh --profile headless "只回复：ok"
 </details>
 
 <details>
+<summary>模型设置：默认模型、输入预测与回答风格</summary>
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-models-zh-dark.png"><img src="docs/assets/ui-models-zh-light.png" width="640" alt="模型设置：可恢复 DSH 默认模型，详细说明在悬浮提示中查看"></picture></p>
+
+</details>
+
+<details>
 <summary>输入框：模型、速度、权限与额度</summary>
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-composer-zh-dark.png"><img src="docs/assets/ui-composer-zh-light.png" width="760" alt="输入框：权限、草图、剩余额度、闪电标识的 Fast 模式和模型选择"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-composer-zh-dark.png"><img src="docs/assets/ui-composer-zh-light.png" width="760" alt="输入框：工作区权限、剩余额度和模型选择"></picture></p>
 
 </details>
 
@@ -138,10 +147,12 @@ dsh --profile headless "只回复：ok"
 | 设置页 | 在这里做什么 |
 | --- | --- |
 | **开始** | 登录与切换账号、各功能开关一览、订阅额度、额度显示和提醒 |
-| **模型** | 默认模型与模型列表、回答风格；折叠的“高级”里有上下文长度、重试、连接方式、云端压缩、审查模型 |
+| **模型** | 默认模型、默认推理等级与模型列表、回答风格；折叠的“高级”里有上下文长度、重试、连接方式、云端压缩、审查模型 |
 | **联网与工具** | 其他模型能否用订阅功能的总开关，搜索来源、ChatGPT 连接器、官方 Codex 子任务 |
 | **创作** | 图片生成、编辑、输入框 @生图、图片查看器，草图画板和 Agent 绘图 |
 | **手机与更多** | 手机远程控制、语音对话（实验性）、本机缓存、支持诊断 |
+
+语音对话默认关闭，在 **手机与更多** 开启后可从输入框发起。Linux 等原生窗口不支持 WebRTC 时，会提供在浏览器中继续同一会话的入口；音色试听仍可使用，继续使用现有订阅，无需 API Key。
 
 **模型感知上下文**跟随账号模型目录，刷新不会覆盖未保存的草稿。额度分组以服务端实际返回为准，包括 Spark 等独立额度。
 
@@ -241,9 +252,7 @@ Agent 先在画板绘制可编辑草图，再以该草图为参考调用订阅�
 <details>
 <summary>配对设置与已配对手机</summary>
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-remote-zh-dark.png"><img src="docs/assets/ui-remote-zh-light.png" width="560" alt="设置里的手机远程控制：开关、配对二维码和手动码、已配对的手机"></picture></p>
-
-<p align="center"><sub>截图中的二维码藏着一个小彩蛋；实际配对请使用 DSH 设置里生成的二维码。</sub></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/ui-remote-zh-dark.png"><img src="docs/assets/ui-remote-zh-light.png" width="560" alt="设置里的手机远程控制：开关、连接状态、配对二维码和手动码"></picture></p>
 
 </details>
 
@@ -258,9 +267,10 @@ Agent 先在画板绘制可编辑草图，再以该草图为参考调用订阅�
 | 功能 | 你可以做什么 | 使用方式 / 条件 |
 | --- | --- | --- |
 | **订阅登录** | 直接登录 ChatGPT，使用 Codex 订阅模型，无需 API Key | 普通聊天无需 Codex CLI |
-| **模型目录同步** | 自动读取账号可用模型与推理档位，支持手动刷新；目录标注退役的模型会在模型名称旁显示退役日期，不会自动切换你的选择 | 新型号以账号目录开放情况为准；模型只来自账号目录，未登录或读取失败时不显示任何模型，也不使用内置列表 |
+| **模型目录同步** | 自动读取账号可用模型与推理档位，支持手动刷新；上次成功读取的目录会按账号保存在本地，重启时可在后台刷新期间继续使用，缓存有效期为 24 小时；目录标注退役的模型会在模型名称旁显示退役日期，不会自动切换你的选择 | 新型号以账号目录开放情况为准；模型只来自账号目录，未登录或读取失败且没有有效缓存时不显示任何模型，也不使用内置列表 |
 | **模型列表** | 在“模型”页中逐个显示或隐藏输入框中的模型；模型选择器沿用 DSH 官方的模型标识（如新模型徽章） | 仅影响列表显示；已选模型和请求不受影响 |
 | **默认模型** | 在“模型”页里选择每次新建会话默认使用的模型 | 写入 DSH 的默认模型设置，与在对话里切换模型是同一处；未设置时跟随 DSH 默认 |
+| **默认推理等级** | 在“模型”页统一选择订阅模型的默认档位；默认跟随各模型的官方目录推荐值 | 手动选档优先；模型不支持所选档位时使用该模型的合法默认值；不更改已有会话的手动选择 |
 | **推理等级** | 在输入框选择模型支持的推理档位 | 档位随模型变化 |
 | **速度档位** | 在支持的模型上切换标准 / Fast；账号目录提供时还有 Ultrafast（Beta），输入框显示闪电标识 | 默认标准；Fast 和 Ultrafast 会增加用量消耗，Ultrafast 目前仅 Pro 500 |
 | **输出详略** | 选择简短、适中或详细的回答偏好 | 默认跟随模型 |
@@ -286,7 +296,7 @@ Agent 先在画板绘制可编辑草图，再以该草图为参考调用订阅�
 | **使用概览** | 在额度卡片里查看累计 token、单日最高、连续使用天数、最常用推理档，以及最近半年的每日用量热力图 | 来自官方使用统计；账号没有该统计时不显示 |
 | **Credits 与重置卡** | 查看额外 Credits、消费上限和可用重置卡 | 账号返回对应数据时显示 |
 | **输入框额度** | 不离开会话即可查看百分比或进度条 | 默认关闭，可选显示方式 |
-| **续航预测** | 根据最近使用速度估算剩余可用时长 | Beta；可选，不是保证值 |
+| **续航预测** | 悬浮或点击输入框额度，查看按最近用量估算的用完时间 | Beta；可选，不是保证值 |
 | **额度提醒** | 使用固定阈值、提前提醒，或分别设置短 / 长周期阈值 | 默认剩余 20% 提醒，可关闭 |
 | **使用重置卡** | 在确认后主动使用服务端提供的重置卡 | 二次确认与等待保护，由服务端判定结果 |
 | **重置后重试** | 等待已确认的短时额度重置，再继续请求 | 默认关闭；等待期间可停止 |
@@ -357,7 +367,7 @@ Agent 先在画板绘制可编辑草图，再以该草图为参考调用订阅�
 <summary>终端方式</summary>
 
 ```sh
-dsh plugin --profile web update dsh-codex-subscription@3.1.6
+dsh plugin --profile web update dsh-codex-subscription@3.2.1
 ```
 
 仅在需要卸载时运行：

@@ -9,6 +9,20 @@ import {
   withCodexOAuthNetwork,
 } from '../src/oauth-network.js'
 
+test('voice standard HTTPS honors direct and NO_PROXY routing without changing model transport', async () => {
+  const original = globalThis.fetch, requests = []
+  globalThis.fetch = async () => new Response('normal-fetch')
+  try {
+    for (const env of [{}, { HTTPS_PROXY:'http://127.0.0.1:7890', NO_PROXY:'chatgpt.com' }]) {
+      const network = createCodexNetworkTransport({ env, platform:'linux', fetchThroughProxy: async (_url,_init,proxy) => { requests.push(proxy); return new Response('standard-https') } })
+      assert.equal(await (await network.fetch('voice','https://chatgpt.com/backend-api/settings/voices',{}, { standardHttps:true })).text(), 'standard-https')
+      assert.equal(await (await network.fetch('model','https://chatgpt.com/backend-api/codex/responses')).text(), 'normal-fetch')
+      assert.equal(await (await network.fetch('voice','https://example.test/',{}, { standardHttps:true })).text(), 'normal-fetch')
+    }
+    assert.deepEqual(requests, [undefined, undefined])
+  } finally { globalThis.fetch = original }
+})
+
 test('OAuth proxy resolution honors standard environment variables and NO_PROXY', () => {
   assert.equal(proxyFromEnvironment({ HTTPS_PROXY: '127.0.0.1:7890' }), 'http://127.0.0.1:7890/')
   assert.equal(proxyFromEnvironment({ HTTPS_PROXY: 'http://127.0.0.1:7890', NO_PROXY: 'auth.openai.com' }), undefined)
@@ -184,4 +198,25 @@ test('network diagnostics keep actionable request failures without proxy address
     quota: { status: 'failed', stage: 'http', code: 'http-error', httpStatus: 502, route: 'environment', elapsed: 'under-1s' },
   })
   assert.doesNotMatch(JSON.stringify(transport.snapshot()), /secret|127\.0\.0\.1|7890/u)
+})
+
+test('caller cancellation is not a transport timeout, while real timeout signals remain diagnosed', async () => {
+  const transport = createCodexNetworkTransport({
+    env: { HTTPS_PROXY: 'http://127.0.0.1:7890' },
+    fetchThroughProxy: async (_input, init) => new Promise((_resolve, reject) => {
+      if (init.signal.aborted) reject(init.signal.reason)
+      else init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })
+    }),
+  })
+  const cancelled = new AbortController()
+  const request = transport.fetch('predictions', 'https://chatgpt.com/backend-api/codex/responses', { signal: cancelled.signal })
+  await new Promise(resolve => setImmediate(resolve))
+  cancelled.abort()
+  await assert.rejects(request, error => error.name === 'AbortError')
+  assert.equal(transport.snapshot().predictions, undefined)
+  const alive = setTimeout(() => {}, 1000)
+  try {
+    await assert.rejects(transport.fetch('predictions', 'https://chatgpt.com/backend-api/codex/responses', { signal: AbortSignal.timeout(10) }), error => error.name === 'TimeoutError')
+    assert.equal(transport.snapshot().predictions.code, 'timeout')
+  } finally { clearTimeout(alive) }
 })

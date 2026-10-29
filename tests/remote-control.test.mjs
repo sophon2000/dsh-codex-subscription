@@ -183,6 +183,7 @@ test('the relay enrolls, pairs, frames messages and re-chunks large replies', as
   }
   const received = []
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'tok', accountId: 'acct' }), fetch, WebSocket: FakeSocket, installationId: 'inst', hostName: 'DSH (test)', userAgent: 'dsh-codex-subscription/1',
     serve: client => ({ receive: message => { received.push(message); void client.send({ id: message.id, result: { big: 'x'.repeat(400_000) } }) }, close() {} }),
     wait: () => new Promise(() => {}),
@@ -210,12 +211,13 @@ test('the relay enrolls, pairs, frames messages and re-chunks large replies', as
 })
 
 test('the browser bundle stays free of Node built-ins (the QR encoder must not pull in fs)', async t => {
-  const { readFile } = await import('node:fs/promises')
+  const { readFile, readdir } = await import('node:fs/promises')
   // Acceptance runs the tests from a packaged copy without the build output or the UI source.
-  const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8').catch(() => undefined)
+  const files = await readdir(new URL('../lib/', import.meta.url)).catch(() => [])
+  const bundles = await Promise.all(files.filter(name => /^client(?:\.[\w-]+)?\.js$/u.test(name)).map(name => readFile(new URL(`../lib/${name}`, import.meta.url), 'utf8')))
   const source = await readFile(new URL('../src/client-remote-control.jsx', import.meta.url), 'utf8').catch(() => undefined)
-  if (bundle === undefined || source === undefined) return t.skip('build output not present')
-  assert.doesNotMatch(bundle, /require\((["'])(?:node:)?(?:fs|path|os|zlib|stream|child_process|net|tls)\1\)/u)
+  if (!bundles.length || source === undefined) return t.skip('build output not present')
+  for (const bundle of bundles) assert.ok(!/require\((["'])(?:node:)?(?:fs|path|os|zlib|stream|child_process|net|tls)\1\)/u.test(bundle), 'client entry and every feature must remain browser-safe')
   assert.match(source, /from 'qrcode\/lib\/core\/qrcode\.js'/u)
 })
 
@@ -281,6 +283,7 @@ test('a host id the relay keeps refusing with 409 is enrolled again and finally 
   class Refused { constructor() { this.handlers = {}; setTimeout(() => this.handlers.error?.(new Error('Unexpected server response: 409')), 1) } on(name, handler) { this.handlers[name] = handler } close() {} }
   const fetch = async () => { enrolls += 1; return { ok: true, json: async () => ({ environment_id: 'env', server_id: 'srv', remote_control_token: 'tok', expires_at: new Date(Date.now() + 3_600_000).toISOString() }) } }
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'a', accountId: 'b' }), fetch, WebSocket: Refused, installationId: 'i', hostName: 'h', userAgent: 'x/1',
     serve: () => ({ receive() {}, close() {} }), wait: () => new Promise(resolve => setTimeout(resolve, 2)),
     renewInstallation: async () => { renewals += 1; return `new-${renewals}` }, conflictRenewMs: 0,
@@ -379,12 +382,18 @@ test('the optimistic phone message keeps one id while running, reopening and com
   session.deriveMessages = () => [...old, { role: 'user', id: 'committed-u', content: [{ type: 'text', text: 'again' }] }]
   const live = await bridge.methods['thread/resume']({ threadId: 's1' }, { notify })
   assert.deepEqual(live.thread.turns.map(turn => turn.items.filter(item => item.type === 'userMessage').map(item => item.id)), [['old-u'], [user.id]])
+  const pagedLive = await bridge.methods['thread/turns/list']({ threadId: 's1', limit: 1 }, {})
+  assert.equal(pagedLive.data[0].id, turn.id)
+  assert.deepEqual(pagedLive.data[0].items.filter(item => item.type === 'userMessage').map(item => item.id), [user.id])
   finish(); await wait()
   const completed = notes.find(([method]) => method === 'turn/completed')[1].turn
   assert.equal(completed.items[0].id, user.id)
   const reopened = await bridge.methods['thread/resume']({ threadId: 's1' }, { notify })
   assert.equal(reopened.thread.turns.at(-1).items[0].id, user.id)
   assert.equal(reopened.thread.turns.at(-1).items[0].clientId, clientId)
+  const pagedDone = await bridge.methods['thread/items/list']({ threadId: 's1', turnId: turn.id }, {})
+  assert.equal(pagedDone.data[0].item.id, user.id)
+  assert.equal(pagedDone.data[0].item.clientId, clientId)
 })
 
 test('a streamed attempt that never commits is closed instead of hanging on the phone', async () => {
@@ -496,6 +505,7 @@ test('a connection that stops answering pings is dropped and reconnected', async
     close() { this.handlers.close?.() }
   }
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'a', accountId: 'b' }), fetch: async () => enrollOk(), WebSocket: Silent, installationId: 'i', hostName: 'h', userAgent: 'x/1',
     serve: () => ({ receive() {}, close() {} }), wait: () => new Promise(resolve => setTimeout(resolve, 2)), pingMs: 5, pongTimeoutMs: 30,
   })
@@ -517,6 +527,7 @@ test('a socket that keeps answering pings stays connected', async () => {
     close() { this.handlers.close?.() }
   }
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'a', accountId: 'b' }), fetch: async () => enrollOk(), WebSocket: Alive, installationId: 'i', hostName: 'h', userAgent: 'x/1',
     serve: () => ({ receive() {}, close() {} }), wait: (_ms, signal) => new Promise(resolve => signal.addEventListener('abort', resolve, { once: true })), pingMs: 5, pongTimeoutMs: 30,
   })
@@ -539,6 +550,7 @@ test('a server Retry-After is a floor for the next attempt and a flapping connec
   }
   class Flap { constructor() { this.handlers = {}; queueMicrotask(() => { this.handlers.open?.(); this.handlers.close?.() }) } on(name, handler) { this.handlers[name] = handler } close() {} }
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'a', accountId: 'b' }), fetch, WebSocket: Flap, installationId: 'i', hostName: 'h', userAgent: 'x/1',
     serve: () => ({ receive() {}, close() {} }), random: () => 1,
     wait: (ms, signal) => { waits.push(ms); return new Promise(resolve => { const timer = setTimeout(resolve, waits.length >= 5 ? 1_000_000 : 1); signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true }) }) },
@@ -720,6 +732,7 @@ test('the paired phones are listed and one can be removed', async () => {
     return { ok: true, json: async () => ({ items: [{ client_id: 'c1', display_name: 'iPhone', platform: 'ios', os_version: '19', app_version: '2', last_seen_at: '2026-10-10T10:00:00Z' }, { nope: true }] }) }
   }
   const relay = createRemoteControlRelay({
+    resolveProxy: async () => undefined,
     credentials: async () => ({ access: 'a', accountId: 'b' }), fetch, WebSocket: class {}, installationId: 'i', hostName: 'h', userAgent: 'x/1',
     serve: () => ({ receive() {}, close() {} }),
   })

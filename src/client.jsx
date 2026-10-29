@@ -3,15 +3,13 @@ import { withComposerSession, openComposerSession, createSessionOpeners } from '
 import { ComposerImagePreviews, MessageImagePreviews, IMAGE_PREVIEWS_CSS } from './client-image-previews.jsx'
 import { imageConversationNode } from './image-conversation-node.js'
 import { CodexImageToolRow, CodexImageOutput } from './client-images.jsx'
-import { SKETCH_CSS } from './sketch-workspace.jsx'
 import { ImageWorkspace } from './image-workspace.jsx'
 import { attachImageFiles, appendImagePrompt } from './image-composer.js'
 import { createSketchTrigger, createImageTrigger } from './sketch-trigger.js'
 import { zh, en } from './client-locales.js'
 import { STYLE } from './client-styles.js'
 import { createAnnotatedImageReference } from './image-edit-reference.js'
-import { SubscriptionImageViewerOverlay } from './subscription-image-viewer.jsx'
-import { SUBSCRIPTION_IMAGE_VIEWER_CSS } from './subscription-image-viewer-styles.js'
+import { DeferredImageViewer } from './client-deferred-image-viewer.jsx'
 import { SubscriptionImageViewerService } from './subscription-image-viewer.js'
 import { createPreferenceController } from './preference-controller.js'
 import { createDefaultModelController } from './default-model-controller.js'
@@ -19,11 +17,14 @@ import { createAccountStatusController } from './account-status-controller.js'
 import { NS, CHANNEL, unwrap } from './client-shared.js'
 import { createSubscriptionRpcClient } from './rpc-contract.js'
 import { CodexComposerQuota } from './client-composer-quota.jsx'
+import { quotaUsageController } from './client-quota.jsx'
 import { CodexModelSelect } from './client-model-select.jsx'
 import { VoiceCallButton } from './client-voice-call.jsx'
 import { CodexAccountEntry } from './client-account-entry.jsx'
 import { CodexSection } from './client-section.jsx'
 import { createHostDiagnostics } from './diagnostic-host.js'
+import { restoreVoiceConversation } from './voice-browser.js'
+import { ComposerPrediction, PREDICTION_CSS } from './client-predictions.jsx'
 
 export const inject = [
   'slots', 'locale', 'connection', 'remote', 'modelDirectories', 'conversation', 'uiConversation', 'sessions',
@@ -34,6 +35,18 @@ export const inject = [
 const ComposerRight = props => <><CodexComposerQuota {...props} /><VoiceCallButton {...props} /></>
 
 export function apply(ctx) {
+  if (new URL(window.location.href).searchParams.has('codexVoiceSession')) ctx.inject(['uiWorkspace', 'sessions'], scope => scope.effect(() => {
+    const sessions = scope.get('sessions'), controller = new AbortController()
+    let attempted = false
+    const restore = () => {
+      if (attempted || (typeof sessions.list?.getSnapshot === 'function' && sessions.list.getSnapshot().phase !== 'ready')) return
+      attempted = true
+      void restoreVoiceConversation({ href: window.location.href, workspace: scope.get('uiWorkspace'), history: window.history, sessions, signal: controller.signal }).catch(() => { /* retain an unavailable target for a deliberate retry */ })
+    }
+    const unsubscribe = sessions.list?.subscribe?.(restore) ?? (() => {})
+    restore()
+    return () => { controller.abort(); unsubscribe() }
+  }, 'codex-subscription: browser voice conversation'))
   const diagnostics = createHostDiagnostics()
   ctx.effect(() => diagnostics.register(ctx.slots), 'codex-subscription: host inspection')
   const imageViewer = new SubscriptionImageViewerService()
@@ -41,12 +54,20 @@ export function apply(ctx) {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'dsh-codex-subscription'
-    tag.textContent = STYLE + SUBSCRIPTION_IMAGE_VIEWER_CSS + SKETCH_CSS + IMAGE_PREVIEWS_CSS
+    tag.textContent = STYLE + IMAGE_PREVIEWS_CSS + PREDICTION_CSS
     document.head.append(tag)
     return () => tag.remove()
   }, 'codex-subscription: style')
   const rpc = createSubscriptionRpcClient(ctx.get('connection').rpc)
   const preference = createPreferenceController(rpc)
+  const quotaUsage = quotaUsageController(rpc)
+  ctx.effect(() => {
+    let mode = preference.getSnapshot().quickQuotaMode
+    return preference.subscribe(() => {
+      const next = preference.getSnapshot().quickQuotaMode
+      if (next !== mode) { mode = next; quotaUsage.invalidate({ preserveUsage: true }) }
+    })
+  }, 'codex-subscription: quota preference snapshot')
   const defaultModel = createDefaultModelController(rpc)
   ctx.effect(() => {
     let previous = JSON.stringify(preference.getSnapshot(), (key,value) => key.startsWith('image') || key === '' ? value : undefined)
@@ -60,7 +81,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     void preference.load()
     void accountStatus.load()
-    const disposeReset = ctx.on('connection/reset', () => { void preference.load(); void preference.refreshModels(); void accountStatus.reload() })
+    const disposeReset = ctx.on('connection/reset', () => { quotaUsage.invalidate(); void preference.load(); void preference.refreshModels(); void accountStatus.reload() })
     return () => {
       disposeReset?.()
       preference.dispose()
@@ -72,7 +93,7 @@ export function apply(ctx) {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'codex-subscription-image-viewer', order: 20,
     inject: () => ({ service: imageViewer, t }),
-  }, SubscriptionImageViewerOverlay))
+  }, DeferredImageViewer))
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section', id: 'codex-subscription', order: 15,
     label: () => t('nav'), locale: NS, inject: () => ({ preference, rpc: rpc, accountStatus, t, diagnostics, defaultModel }),
@@ -99,6 +120,12 @@ export function apply(ctx) {
       directory: (scopedDirectories ?? rootDirectories).directoryFor(sessionId).store,
     }),
   }, ComposerRight))
+  ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
+    name: 'conversation.input.overlay', id: 'codex-subscription-prediction', order: 20,
+    inject: sessionId => ({ sessionId, preference, rpc, t, accountStatus,
+      directory: (scopedDirectories ?? rootDirectories).directoryFor(sessionId).store,
+    }),
+  }, ComposerPrediction))
   const installDirectorySlots = scope => {
     scope.effect(() => diagnostics.register(scope.slots), 'codex-subscription: scoped host inspection')
     const modelDirectories = scope.get('modelDirectories')

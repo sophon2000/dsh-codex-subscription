@@ -1,4 +1,4 @@
-import { Hint } from './client-hint.jsx'
+import { Hint, SettingsLabel } from './client-hint.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { create as createQr } from 'qrcode/lib/core/qrcode.js'
 import { Button, Switch } from './client-primitives.js'
@@ -23,7 +23,7 @@ function Qr({ value, label }) {
 }
 
 /** Beta: show this DSH in the ChatGPT mobile app's Codex list (Remote Control). */
-export function RemoteControlCard({ rpc, preference, snapshot, t }) {
+export function RemoteControlCard({ rpc, preference, snapshot, t, active = true }) {
   const [state, setState] = useState()
   const [pairing, setPairing] = useState()
   const [busy, setBusy] = useState(false)
@@ -48,11 +48,12 @@ export function RemoteControlCard({ rpc, preference, snapshot, t }) {
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => {
     if (!on) { setClients(undefined); return undefined }
+    if (!active) return undefined
     let stopped = false, timer
     const poll = async () => { await readClients(); if (!stopped) timer = setTimeout(poll, 20000) }
     void poll()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [on, rpc])
+  }, [on, rpc, active])
   const remove = async client => {
     if (removing) return
     setRemoving(client.clientId); setFailed(false)
@@ -64,16 +65,18 @@ export function RemoteControlCard({ rpc, preference, snapshot, t }) {
   }
   useEffect(() => {
     if (!on) { setState(undefined); setPairing(undefined); return undefined }
+    if (!active) return undefined
     let stopped = false, timer
     const poll = async () => { await read(); if (!stopped) timer = setTimeout(poll, 4000) }
     void poll()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [on, rpc])
+  }, [on, rpc, active])
   useEffect(() => {
-    if (!pairing) return undefined
+    if (!pairing || !active) return undefined
+    setNow(Date.now())
     const timer = setInterval(() => setNow(Date.now()), 5000)
     return () => clearInterval(timer)
-  }, [pairing])
+  }, [pairing, active])
   const pair = async () => {
     if (busy) return
     setBusy(true); setFailed(false)
@@ -90,7 +93,7 @@ export function RemoteControlCard({ rpc, preference, snapshot, t }) {
   const status = state?.status ?? 'connecting'
   return <section className="codexSubscriptionCard codexSubscriptionPreferencesCard" aria-label={t('remoteTitle')}>
     <div className="codexSubscriptionPreference">
-      <div className="codexSubscriptionPreferenceCopy"><span className="codexSubscriptionPreferenceLabel">{t('remoteTitle')} <small>Beta</small></span><Hint t={t}>{t(on ? 'state_remote_on' : 'state_remote_off')}</Hint></div>
+      <div className="codexSubscriptionPreferenceCopy"><SettingsLabel description={[t('remoteHint'), t('remoteLimits')].join(' ')}>{t('remoteTitle')} <small>Beta</small></SettingsLabel>{snapshot.status === 'ready' ? <Hint>{t(on ? 'state_remote_on' : 'state_remote_off')}</Hint> : null}</div>
       <Switch checked={on} label={t('remoteTitle')} disabled={!snapshot.writable} onChange={next => { void preference.set({ remoteControl: next ? 'on' : 'off' }) }} />
     </div>
     {on ? <>
@@ -117,7 +120,6 @@ export function RemoteControlCard({ rpc, preference, snapshot, t }) {
           <Button type="button" variant="outline" disabled={Boolean(removing)} onClick={() => { void remove(client) }}>{t('remoteRevoke')}</Button>
         </div>)}
       </div> : null}
-      <p className="codexSubscriptionHelp">{t('remoteLimits')}</p>
     </> : null}
   </section>
 }

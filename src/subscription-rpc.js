@@ -24,15 +24,53 @@ export async function settlesLive(preferences, patch, signal, { attempts = 8, de
   return live()
 }
 
-export function createSubscriptionRpcHandler({ authHandler, usageReader, accountUsageReader, planHistoryReader, usageProfileReader, resetCreditService, preferences, defaultModel, runtimeManagement, remoteControl, desktopVoice, voicePreview, diagnosticsReader, modelCatalog, originalImages, resolveInheritedOriginal, closeConnections, onAccountChanged, onCleanupFailure }) {
+export function createSubscriptionRpcHandler({ authHandler, usageReader, accountUsageReader, planHistoryReader, usageProfileReader, resetCreditService, preferences, defaultModel, runtimeManagement, remoteControl, desktopVoice, nativeVoice, voicePreview, composerPredictions, diagnosticsReader, modelCatalog, originalImages, resolveInheritedOriginal, closeConnections, onAccountChanged, onCleanupFailure }) {
   return async (endpoint, payload, signal) => {
-    if (endpoint === 'default-model/status' || endpoint === 'default-model/select') {
+    if (endpoint === 'predictions/generate') {
+      try {
+        signal?.throwIfAborted()
+        return { ok: true, value: composerPredictions ? await composerPredictions.generate(payload, signal) : { prediction: null } }
+      } catch (error) {
+        if (signal?.aborted) throw error
+        return publicError(error?.code === 'invalid-input' ? 'invalid-input' : 'operation-error', 'Could not generate an input prediction')
+      }
+    }
+    if (endpoint.startsWith('voice/native/')) {
+      try {
+        signal.throwIfAborted()
+        if (!nativeVoice) return publicError('voice-native-unavailable', 'Native voice is unavailable')
+        const action = endpoint.slice('voice/native/'.length)
+        if (action === 'probe') return { ok: true, value: await nativeVoice.probe(signal) }
+        const sessionId = payload?.sessionId
+        if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 512) return publicError('invalid-input', 'Invalid voice request')
+        if (action === 'start') {
+          const current = preferences?.status?.() ?? {}
+          if (current.voiceCall !== 'on') return publicError('unavailable', 'Voice is turned off')
+          if (payload.captureAllowed !== true) return publicError('invalid-input', 'Microphone permission is required')
+          return { ok: true, value: await nativeVoice.start({ sessionId, captureAllowed: true, voice: current.voiceVoice, language: current.voiceLanguage }, signal) }
+        }
+        const leaseToken = payload?.leaseToken
+        if (typeof leaseToken !== 'string' || leaseToken.length < 16 || leaseToken.length > 128) return publicError('invalid-input', 'Invalid voice owner')
+        if (action === 'status') return { ok: true, value: nativeVoice.status(sessionId, leaseToken) }
+        if (action === 'stop') return { ok: true, value: await nativeVoice.stop({ sessionId, leaseToken }) }
+        if (action === 'control' && ['mute', 'outputMute'].includes(payload.action) && typeof payload.muted === 'boolean') {
+          return { ok: true, value: await nativeVoice[payload.action]({ sessionId, leaseToken, muted: payload.muted }) }
+        }
+        return publicError('invalid-input', 'Invalid voice request')
+      } catch (error) {
+        if (signal.aborted) throw error
+        return publicError(error?.code === 'voice-native-unavailable' ? 'voice-native-unavailable' : 'operation-error', 'Could not use native voice')
+      }
+    }
+    if (endpoint === 'default-model/status' || endpoint === 'default-model/select' || endpoint === 'default-model/reset') {
       try {
         signal.throwIfAborted()
         if (!defaultModel) return publicError('unavailable', 'The default model is unavailable')
         const value = endpoint === 'default-model/status'
           ? defaultModel.status()
-          : await defaultModel.select({ model: payload?.model })
+          : endpoint === 'default-model/reset'
+            ? await defaultModel.reset()
+            : await defaultModel.select({ model: payload?.model })
         return { ok: true, value }
       } catch (error) {
         if (signal.aborted) throw error
@@ -75,7 +113,11 @@ export function createSubscriptionRpcHandler({ authHandler, usageReader, account
         if (endpoint === 'voice/stop') { desktopVoice.stop(payload.sessionId); return { ok: true, value: {} } }
         const current = preferences?.status?.() ?? {}
         if (current.voiceCall !== 'on') return publicError('unavailable', 'Voice is turned off')
-        return { ok: true, value: await desktopVoice.start({ sessionId: payload.sessionId, sdp: payload.sdp, voice: current.voiceVoice, language: current.voiceLanguage }) }
+        // A browser call takes over only after the previous host microphone and
+        // its remote session have been released, so late cleanup cannot stop it.
+        await nativeVoice?.close()
+        signal.throwIfAborted()
+        return { ok: true, value: await desktopVoice.start({ sessionId: payload.sessionId, sdp: payload.sdp, voice: current.voiceVoice, language: current.voiceLanguage, signal }) }
       } catch (error) {
         if (signal.aborted) throw error
         return publicError('operation-error', 'Could not start the voice call')
@@ -85,12 +127,12 @@ export function createSubscriptionRpcHandler({ authHandler, usageReader, account
       try {
         signal.throwIfAborted()
         if (!voicePreview) return publicError('unavailable', 'Voice preview is unavailable')
-        if (endpoint === 'voice/catalog') return { ok: true, value: { voices: await voicePreview.available(payload?.language) } }
-        const value = await voicePreview.preview(payload?.voice, payload?.language)
+        if (endpoint === 'voice/catalog') return { ok: true, value: { voices: await voicePreview.available(payload?.language, signal) } }
+        const value = await voicePreview.preview(payload?.voice, payload?.language, signal)
         return value === undefined ? publicError('not-found', 'No sample for this voice') : { ok: true, value }
       } catch (error) {
         if (signal.aborted) throw error
-        return publicError('operation-error', 'Could not load the voice sample')
+        return publicError(['voice-auth', 'voice-catalog', 'voice-download'].includes(error?.code) ? error.code : 'operation-error', 'Could not load the voice sample')
       }
     }
     if (['remote/status', 'remote/enable', 'remote/disable', 'remote/pair', 'remote/clients', 'remote/revoke'].includes(endpoint)) {
@@ -175,6 +217,7 @@ export function createSubscriptionRpcHandler({ authHandler, usageReader, account
             verbosityModels: Array.isArray(value?.verbosityModels) ? value.verbosityModels : [],
             fastModels: Array.isArray(value?.fastModels) ? value.fastModels : [],
             ultrafastModels: Array.isArray(value?.ultrafastModels) ? value.ultrafastModels : [],
+            ultraModels: Array.isArray(value?.ultraModels) ? value.ultraModels : [],
             catalogStatus: value?.catalogStatus,
           },
         }
@@ -332,7 +375,10 @@ export function createSubscriptionRpcHandler({ authHandler, usageReader, account
       if (endpoint === 'logout') tasks.push(() => usageReader.clear(), () => accountUsageReader?.clear())
       if (endpoint === 'account/remove' && typeof payload?.id === 'string') tasks.push(() => usageReader.clearScope(payload.id))
       const outcomes = await Promise.allSettled(tasks.map(task => Promise.resolve().then(task)))
-      if (outcomes.some(value => value.status === 'rejected')) {
+      const catalogOutcomes = endpoint === 'logout'
+        ? []
+        : await Promise.allSettled([Promise.resolve().then(() => modelCatalog?.initialize())])
+      if ([...outcomes, ...catalogOutcomes].some(value => value.status === 'rejected')) {
         try { onCleanupFailure?.() } catch { /* Diagnostics must not change account results. */ }
       }
       if (endpoint !== 'logout') void Promise.resolve().then(() => modelCatalog?.refresh({ signal: undefined })).catch(() => {})

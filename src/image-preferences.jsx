@@ -1,10 +1,10 @@
-import { Hint } from './client-hint.jsx'
+import { SettingsLabel } from './client-hint.jsx'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Button, Menu, IconChevronDownOutline14 } from './client-primitives.js'
 import { IMAGE_MODELS } from './image-models.js'
 import { IMAGE_SETTING_GROUPS, imageGroupValue, imageGroupPatch } from './image-setting-groups.js'
 
-export function ImageChoice({ t, label, hint, value, text, items, disabled, onSelect }) {
+export function ImageChoice({ t, label, hint, title, value, text, items, disabled, onSelect }) {
   const [open, setOpen] = useState(false)
   const anchor = useRef(null)
   useEffect(() => {
@@ -22,8 +22,7 @@ export function ImageChoice({ t, label, hint, value, text, items, disabled, onSe
   }, [open, disabled])
   return <div className="codexSubscriptionPreference codexImagePreference">
     <div className="codexSubscriptionPreferenceCopy">
-      <span>{label}</span>
-      {hint ? <Hint t={t}>{hint}</Hint> : null}
+      <SettingsLabel className="" description={[hint, title].filter(Boolean).join(' ')}>{label}</SettingsLabel>
     </div>
     <Menu open={open && !disabled} items={items} selectedId={value}
       onSelect={id => { setOpen(false); onSelect(id) }} onClose={() => setOpen(false)}
@@ -54,7 +53,7 @@ export function ImagePreferences({ preference, t, section = 'image' }) {
         onSelect={id => { void preference.set(imageGroupPatch(group, id === 'on')) }} />
     })}
     {!sketch ? <div className="codexImageDefaultsGroup">
-      <ImageChoice t={t} label={t('imageModel')} value={snapshot.imageModel} text={modelLabel(snapshot.imageModel)}
+      <ImageChoice t={t} label={t('imageModel')} hint={snapshot.imageModel.includes('2.5') ? t('imageModelHint') : undefined} value={snapshot.imageModel} text={modelLabel(snapshot.imageModel)}
         disabled={disabled || !active}
         items={Object.keys(IMAGE_MODELS).map(id => ({ id, label: `${modelLabel(id)}${id.includes('2.5') ? ` · ${t('imageExperimental')}` : ''}` }))}
         onSelect={imageModel => { void preference.set({ imageModel, imageQuality: 'auto' }) }} />
@@ -63,7 +62,6 @@ export function ImagePreferences({ preference, t, section = 'image' }) {
         items={IMAGE_MODELS[snapshot.imageModel].map(id => ({ id, label: t(`imageQuality_${id}`) }))}
         onSelect={imageQuality => { void preference.set({ imageQuality }) }} />
     </div> : null}
-    {!sketch && snapshot.imageModel.includes('2.5') ? <Hint t={t} as="p">{t('imageModelHint')}</Hint> : null}
     </div>
     {snapshot.error ? <div className="codexSubscriptionRecover" role="alert"><p className="codexSubscriptionError">{t('preferenceFailed')}</p><Button type="button" variant="outline" onClick={() => { void preference.retry() }}>{t('preferenceRetry')}</Button></div> : null}
   </section>
