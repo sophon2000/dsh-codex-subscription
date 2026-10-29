@@ -4,7 +4,9 @@
 // one the ChatGPT desktop app speaks; OpenAI does not document third-party hosts.
 
 import { randomUUID } from 'node:crypto'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { diagnosticLog } from './diagnostic-log.js'
+import { resolveCodexOAuthProxy } from './oauth-network.js'
 import { phoneLog } from './remote-control-log.js'
 
 export const REMOTE_CONTROL_BASE_URL = 'https://chatgpt.com/backend-api/'
@@ -84,6 +86,7 @@ function enrollment(value) {
  *   credentials: (signal?: AbortSignal) => Promise<{ access?: string, accountId?: string }>,
  *   fetch?: typeof fetch,
  *   WebSocket: new (url: string, options: object) => any,
+ *   resolveProxy?: (options: { target: URL, signal: AbortSignal }) => Promise<string | undefined>,
  *   installationId: string,
  *   hostName: string,
  *   userAgent: string,
@@ -362,8 +365,28 @@ export function createRemoteControlRelay(options) {
 
   const connectOnce = async signal => {
     const current = await ensureEnrollment(signal)
+    if (signal.aborted) return
+    // HTTP enrollment already uses the shared proxy policy; the imported ws
+    // constructor needs its own agent. Resolve again on each reconnect.
+    const proxy = endpoints.websocket.protocol === 'wss:' ? await new Promise((resolve, reject) => {
+      const lookup = AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      const abort = () => reject(signal.aborted ? signal.reason : new RemoteControlError('timeout', 'Proxy resolution timed out'))
+      lookup.addEventListener('abort', abort, { once: true })
+      Promise.resolve().then(() => {
+        lookup.throwIfAborted()
+        return (options.resolveProxy ?? resolveCodexOAuthProxy)({ target: endpoints.websocket, signal: lookup })
+      }).then(resolve, reject).finally(() => lookup.removeEventListener('abort', abort))
+      if (lookup.aborted) abort()
+    }) : undefined
+    if (signal.aborted) return
     await new Promise((resolve, reject) => {
+      // Agent CONNECT precedes ws's own handshake timer. Own that socket too,
+      // so a silent proxy cannot retain a connection after stop or timeout.
+      const connecting = new AbortController()
+      const agent = proxy ? new HttpsProxyAgent(proxy, { signal: connecting.signal }) : undefined
       const ws = new options.WebSocket(endpoints.websocket.toString(), {
+        handshakeTimeout: REQUEST_TIMEOUT_MS,
+        ...(agent ? { agent } : {}),
         headers: {
           authorization: `Bearer ${current.token}`,
           'user-agent': options.userAgent,
@@ -376,16 +399,22 @@ export function createRemoteControlRelay(options) {
       })
       socket = ws
       let queue = Promise.resolve()
-      const onAbort = () => ws.close()
+      const onAbort = () => { stopBeat(); ws.close() }
       signal.addEventListener('abort', onAbort, { once: true })
       let ping
       let silent
+      const handshake = setTimeout(() => {
+        stopBeat()
+        try { (ws.terminate ?? ws.close).call(ws) } catch { /* the error/close handler follows */ }
+        reject(new RemoteControlError('timeout', 'Remote Control connection timed out'))
+      }, REQUEST_TIMEOUT_MS)
       const hearFrom = () => {
         clearTimeout(silent)
         silent = setTimeout(() => { state.lastError = 'timeout'; try { (ws.terminate ?? ws.close).call(ws) } catch { /* already gone */ } }, options.pongTimeoutMs ?? PONG_TIMEOUT_MS)
       }
-      const stopBeat = () => { clearInterval(ping); clearTimeout(silent) }
+      const stopBeat = () => { clearTimeout(handshake); clearInterval(ping); clearTimeout(silent); connecting.abort(); agent?.destroy() }
       ws.on('open', () => {
+        clearTimeout(handshake)
         state.status = 'connected'; state.connectedAt = now(); state.lastError = undefined
         diagnosticLog.info('phone', 'connected to the Codex relay')
         replay(ws)
@@ -411,6 +440,7 @@ export function createRemoteControlRelay(options) {
       })
       ws.on('error', error => { stopBeat(); reject(new RemoteControlError('socket', error?.message ?? 'socket error')) })
       ws.on('close', () => { stopBeat(); signal.removeEventListener('abort', onAbort); resolve() })
+      if (signal.aborted) onAbort()
     })
     // The phones' streams outlive the socket: they continue on the next connection, with what they missed sent again.
     assemblies.clear()
@@ -430,6 +460,7 @@ export function createRemoteControlRelay(options) {
         // Only a connection that lasted counts as healthy; a flapping one keeps backing off.
         if (state.connectedAt !== undefined && now() - state.connectedAt >= STABLE_MS) delay = INITIAL_RECONNECT_MS
       } catch (error) {
+        if (signal.aborted) break
         asked = error?.retryAfterMs
         state.lastError = error?.code ?? 'network'
         if (options.debug) state.detail = String(error?.message ?? error).slice(0, 160)

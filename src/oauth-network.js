@@ -3,7 +3,6 @@ import { createDiagnosticEvents } from './diagnostic-events.js'
 import { diagnosticLog } from './diagnostic-log.js'
 import { request as httpsRequest } from 'node:https'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { PassThrough, Readable } from 'node:stream'
 import { promisify } from 'node:util'
 
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -67,9 +66,9 @@ async function windowsSystemProxy(options = {}) {
   const reg = `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\reg.exe`
   const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
   try {
-    const enabled = await run(reg, ['query', key, '/v', 'ProxyEnable'], { windowsHide: true, encoding: 'utf8' })
+    const enabled = await run(reg, ['query', key, '/v', 'ProxyEnable'], { windowsHide: true, encoding: 'utf8', timeout: 10_000, signal: options.signal })
     if (!/REG_DWORD\s+0x1\b/iu.test(enabled.stdout)) return undefined
-    const configured = await run(reg, ['query', key, '/v', 'ProxyServer'], { windowsHide: true, encoding: 'utf8' })
+    const configured = await run(reg, ['query', key, '/v', 'ProxyServer'], { windowsHide: true, encoding: 'utf8', timeout: 10_000, signal: options.signal })
     const match = /^\s*ProxyServer\s+REG_\w+\s+(.+)$/imu.exec(configured.stdout)
     return selectWindowsProxy(match?.[1])
   } catch {
@@ -80,7 +79,7 @@ async function windowsSystemProxy(options = {}) {
 async function macSystemProxy(options = {}) {
   const run = options.execFile ?? execFileAsync
   try {
-    const result = await run('/usr/sbin/scutil', ['--proxy'], { encoding: 'utf8' })
+    const result = await run('/usr/sbin/scutil', ['--proxy'], { encoding: 'utf8', timeout: 10_000, signal: options.signal })
     if (!/^\s*HTTPSEnable\s*:\s*1\s*$/imu.test(result.stdout)) return undefined
     const host = /^\s*HTTPSProxy\s*:\s*(\S+)\s*$/imu.exec(result.stdout)?.[1]
     const port = /^\s*HTTPSPort\s*:\s*(\d+)\s*$/imu.exec(result.stdout)?.[1]
@@ -128,13 +127,46 @@ export function transportError(error, signal) {
 }
 
 export function transportResponseBody(response, signal) {
-  const body = new PassThrough()
-  response.on('error', error => body.destroy(transportError(error, signal)))
-  // Cancelling the web reader must also release an idle underlying connection.
-  body.on('close', () => response.destroy())
-  const stream = Readable.toWeb(body)
-  response.pipe(body)
-  return stream
+  const iterator = response[Symbol.asyncIterator]()
+  let finished = false, controller
+  const cleanup = () => signal?.removeEventListener('abort', abort)
+  const fail = error => {
+    if (finished) return
+    finished = true
+    cleanup()
+    controller.error(transportError(error, signal))
+    response.destroy()
+  }
+  const abort = () => fail(signal.reason)
+  return new ReadableStream({
+    start(value) {
+      controller = value
+      // Keep the per-response guard for errors arriving after cancel or close.
+      response.on('error', fail)
+      response.once('close', () => {
+        if (!response.readableEnded) fail(Object.assign(new Error('Response body closed before completion'), { code: 'ERR_STREAM_PREMATURE_CLOSE' }))
+      })
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted) abort()
+    },
+    async pull() {
+      try {
+        const { value, done } = await iterator.next()
+        if (finished) return
+        if (done) {
+          finished = true
+          cleanup()
+          controller.close()
+        } else controller.enqueue(new Uint8Array(value))
+      } catch (error) { fail(error) }
+    },
+    async cancel() {
+      finished = true
+      cleanup()
+      response.destroy()
+      try { await iterator.return() } catch { /* cancelled reads may already have failed */ }
+    },
+  })
 }
 
 export function fetchThroughProxy(input, init, proxyUrl) {
@@ -146,7 +178,7 @@ export function fetchThroughProxy(input, init, proxyUrl) {
     const request = httpsRequest(target, {
       method: init?.method ?? 'GET',
       headers: Object.fromEntries(headers.entries()),
-      agent: new HttpsProxyAgent(proxyUrl),
+      agent: proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined,
       signal: init?.signal,
     }, response => {
       const responseHeaders = new Headers()
@@ -202,7 +234,7 @@ export async function withCodexNetwork(run, options = {}) {
       }
       const route = await proxy
       scopedOptions.onRoute?.(route.source)
-      const response = await (route.url === undefined ? fetchBeforeScope(input, init) : proxyFetch(input, init, route.url))
+      const response = await (route.url === undefined && !scopedOptions.standardHttps ? fetchBeforeScope(input, init) : proxyFetch(input, init, route.url))
       return scopedOptions.transformResponse?.(response, target) ?? response
     }
     globalThis.fetch = scopedFetch
@@ -265,6 +297,7 @@ export function createCodexNetworkTransport(options = {}) {
     let routed = false
     try {
       const value = await withCodexNetwork(operation, { ...options, ...connection, onRoute: source => { route = source; routed = true } })
+      connection.signal?.throwIfAborted()
       if (value instanceof Response && !value.ok) {
         remember(area, { status: 'failed', stage: 'http', code: 'http-error', httpStatus: value.status, route, elapsed: elapsedBucket(now() - startedAt) })
       } else if (routed || value instanceof Response) {
@@ -272,6 +305,9 @@ export function createCodexNetworkTransport(options = {}) {
       }
       return value
     } catch (error) {
+      // A caller changing drafts or closing a view is not a network failure.
+      // Keep real AbortSignal.timeout failures visible in support diagnostics.
+      if (connection.signal?.aborted && connection.signal.reason?.name !== 'TimeoutError') throw error
       if (routed) remember(area, { status: 'failed', stage: 'transport', code: classifyTransportError(error), route, elapsed: elapsedBucket(now() - startedAt) })
       throw error
     }
@@ -279,7 +315,9 @@ export function createCodexNetworkTransport(options = {}) {
   return Object.freeze({
     run,
     history: evidence.snapshot,
-    fetch: (area, input, init) => run(area, () => globalThis.fetch(input, init)),
+    fetch: (area, input, init, connection) => run(area, () => globalThis.fetch(input, init), {
+      ...connection, signal: init?.signal ?? (input instanceof Request ? input.signal : undefined) ?? connection?.signal,
+    }),
     snapshot: () => Object.fromEntries([...attempts].map(([area, value]) => [area, { ...value }])),
   })
 }

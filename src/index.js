@@ -2,6 +2,8 @@ import { createSettingsAdapter } from './settings-adapter.js'
 import { observeAdapter } from './request-observer.js'
 import { createHiddenModelDirectory } from './hidden-model-directory.js'
 import { createDefaultModelController } from './default-model.js'
+import { withDefaultReasoningEffort } from './default-reasoning-effort.js'
+import { DEFAULT_REASONING_EFFORT_FIELD, normalizeDefaultReasoningEffort } from './settings-contract.js'
 import { PREFERENCE_FIELDS, normalizeReasoningCache } from './preference-fields.js'
 import { createSubscriptionConnection } from './subscription-connection.js'
 import { createCompactionBridge } from './subscription-compaction.js'
@@ -19,6 +21,9 @@ import { readSubscriptionCredentials } from './subscription-credentials.js'
 import { USER_AGENT } from './version.js'
 import { createRemoteControl } from './remote-control.js'
 import { createDshRemoteControl } from './remote-control-dsh.js'
+import { createRemoteHistorySource } from './remote-history-source.js'
+import { createUltraExecutionPreset } from './ultra-execution.js'
+import { loadHostSessionSdk } from './host-session-sdk.js'
 import { createRemoteImageAssets } from './remote-image-assets.js'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import * as dshLlm from '@deepseek-ai/dsh-llm'
@@ -35,11 +40,13 @@ import { openCodexAuthUrl } from './external-url.js'
 import { CodexLoginCoordinator, createCodexRpcHandler } from './login-coordinator.js'
 import { createCodexNetworkTransport } from './oauth-network.js'
 import { createModels, openaiCodexProvider, openaiCodexSubscriptionProvider } from './pi-ai-runtime.js'
-import { createOfficialModelCatalog } from './model-catalog.js'
+import { createOfficialModelCatalog, withModelCatalogReady } from './model-catalog.js'
 import { readCapabilitySettings, normalizeSearchDomains, CUSTOM_CONTEXT_OVERRIDES_FIELD, SEARCH_MODE_FIELD, SEARCH_MODES, SEARCH_DOMAINS_FIELD, QUOTA_ALERTS_FIELD, QUOTA_ALERT_MODES, QUOTA_THRESHOLD_FIELDS, MAX_CONTEXT_BUDGET } from './capability-settings.js'
 import { DSH_SEARCH_PROVIDER_ID, createDshSearchProvider } from './dsh-search.js'
 import { createSearchRouter, gateSearchProvider } from './search-router.js'
 import { CODEX_AUTO_SEARCH_PROVIDER_ID, CODEX_SEARCH_PROVIDER_ID, createCodexAutoSearchProvider, createCodexSearchProvider } from './codex-search.js'
+import { createCodexFetchProvider, createCodexFetchRouter, configuredFetchProviderId } from './codex-fetch.js'
+import { FETCH_PROVIDER_FIELD, FETCH_PROVIDER_CODEX, normalizeFetchProvider } from './settings-contract.js'
 import { createCodexImageTool } from './codex-images.js'
 import { IMAGE_FEATURE_DEFAULTS } from './image-features.js'
 import { watchImageTool } from './image-tool-registration.js'
@@ -80,7 +87,9 @@ const REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 
 import { createSubscriptionRpcHandler } from './subscription-rpc.js'
 import { createVoicePreview } from './voice-preview.js'
+import { createComposerPredictions } from './composer-predictions.js'
 import { withEndCallTool } from './voice-tools.js'
+import { createNativeVoiceHost } from './voice-native-host.js'
 export { createSubscriptionRpcHandler } from './subscription-rpc.js'
 
 export function createSearchProviderSwitcher(loader) {
@@ -170,17 +179,28 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.on?.('plugin-manager/install-state', value => runtimeManagement.progress(value)))
   const modelCatalog = createOfficialModelCatalog({
     onUpdated: () => ctx.llm.emitAdaptersUpdated?.(),
+    onCacheError: error => ctx.logger?.debug?.('could not access the Codex model catalog cache (%s)', error?.code ?? error?.name ?? 'unknown error'),
+    cacheDirectory: dshHomePath('state', 'codex-subscription', 'model-catalog'),
     getAuth: options => resolveAuth(options),
     readCredential: options => store.read(PROVIDER, options),
     baseModels: () => baseProvider.getModels(),
     fetch: (input, init) => network.fetch('catalog', input, init),
     retryDelaysMs: [5_000, 15_000, 30_000, 60_000, 120_000, 300_000],
   })
+  const appendUltraPolicy = loadHostSessionSdk()?.appendPluginRecord
+  const ultra = createUltraExecutionPreset({
+    catalog: modelCatalog,
+    resolveAgent: () => ctx.get?.('agents')?.currentInitiator?.(),
+    defaultEffort: () => settings.get()[DEFAULT_REASONING_EFFORT_FIELD],
+    record: appendUltraPolicy,
+  })
+  ctx.effect(() => ultra.install(ctx), 'codex-subscription: Ultra execution preset')
   const connection = createSubscriptionConnection({ resolveMode: () => settings.get().connectionMode })
   // The settings surface edits DSH's own default model instead of keeping a
   // second copy, so every new conversation opens on what the user selected.
   const defaultModel = createDefaultModelController({
     resolveService: () => ctx.get?.('agentDefaultModel'),
+    resolveEditor: () => ctx.get?.('configEditor'),
     listModels: () => modelCatalog.getModels().map(model => model.id),
   })
   const accountScope = async () => {
@@ -203,6 +223,7 @@ export function apply(ctx, config = {}) {
   ctx.on('session/event', (session, event) => reasoning.sessionEvent(session, event))
   ctx.effect(() => () => connection.dispose())
   const provider = openaiCodexSubscriptionProvider({
+    ultra,
     connection,
     compaction,
     reasoning,
@@ -222,6 +243,7 @@ export function apply(ctx, config = {}) {
     catalog: modelCatalog,
     runNetwork: network.run,
   })
+  let fetchRouted = false
   const preferences = {
     status: () => {
       const models = modelCatalog.getModels()
@@ -230,9 +252,11 @@ export function apply(ctx, config = {}) {
         [AUTO_QUOTA_RETRY_FIELD]: normalizeAutoQuotaRetry(settings.get()[AUTO_QUOTA_RETRY_FIELD]),
         compactionMode: settings.get().compactionMode ?? 'dsh',
         reasoningCache: normalizeReasoningCache(settings.get().reasoningCache),
+        [DEFAULT_REASONING_EFFORT_FIELD]: normalizeDefaultReasoningEffort(settings.get()[DEFAULT_REASONING_EFFORT_FIELD]),
         connectionMode: settings.get().connectionMode ?? 'sse',
         reviewModel: settings.get().reviewModel ?? 'session',
         remoteControl: settings.get().remoteControl ?? 'off',
+        composerPredictions: settings.get().composerPredictions === 'on' ? 'on' : 'off',
         otherModels: settings.get().otherModels === 'off' ? 'off' : 'on',
         subagentBackend: settings.get().subagentBackend ?? 'dsh',
         subagentBackendAvailable: subagentBackend !== undefined,
@@ -243,6 +267,8 @@ export function apply(ctx, config = {}) {
           settings.get()[LEGACY_QUICK_QUOTA_FIELD],
         ),
         [SEARCH_PROVIDER_FIELD]: settings.get()[SEARCH_PROVIDER_FIELD],
+        [FETCH_PROVIDER_FIELD]: normalizeFetchProvider(settings.get()[FETCH_PROVIDER_FIELD]),
+        fetchRoutingAvailable: fetchRouted,
         [SPEED_MODE_FIELD]: settings.get()[SPEED_MODE_FIELD],
         [OUTPUT_VERBOSITY_FIELD]: normalizeOutputVerbosity(settings.get()[OUTPUT_VERBOSITY_FIELD]),
         [INPUT_IMAGE_DETAIL_FIELD]: normalizeInputImageDetail(settings.get()[INPUT_IMAGE_DETAIL_FIELD]),
@@ -261,11 +287,13 @@ export function apply(ctx, config = {}) {
         catalogStatus: modelCatalog.status(),
         verbosityModels: provider.getModels().filter(model => modelCatalog.metadata(model.id)?.supportVerbosity ?? model.id !== 'gpt-5.3-codex-spark').map(model => model.id),
         ultrafastModels: provider.getModels().filter(model => modelCatalog.metadata(model.id)?.supportsUltrafast === true).map(model => model.id),
+        ultraModels: provider.getModels().filter(model => ultra.supported(model.id)).map(model => model.id),
         fastModels: provider.getModels().filter(model => modelCatalog.metadata(model.id)?.supportsFast ?? supportsCodexFastMode(model.id)).map(model => model.id),
         writable: ctx.settings.writable,
       }
     },
     update: async patch => {
+      if (patch[FETCH_PROVIDER_FIELD] === FETCH_PROVIDER_CODEX && !fetchRouted) throw new Error('This DSH version does not support Codex webpage reading')
       if (Object.hasOwn(patch, 'subagentBackend')) {
         if (!subagentBackend) throw new Error('DSH subagent services are unavailable')
         await subagentBackend.select(patch.subagentBackend)
@@ -436,8 +464,59 @@ export function apply(ctx, config = {}) {
   })
   ctx.effect(() => settings.watch((value, previous) => hiddenDirectory.settingsChanged(normalizeDisabledModels(value[DISABLED_MODELS_FIELD]), normalizeDisabledModels(previous[DISABLED_MODELS_FIELD]))), 'codex-subscription: hidden model directory')
   ctx.effect(() => ctx.on?.('session/event', (_session, event) => { if (event?.type === 'request/context') hiddenDirectory.dependenciesChanged() }), 'codex-subscription: hidden model dependencies')
-  ctx.llm.registerAdapter([PROVIDER], hiddenDirectory.wrap(observeAdapter(reasoning.wrapAdapter(compaction.wrapAdapter(adapter)), provider)))
+  ctx.effect(() => settings.watch((value, previous) => {
+    if (normalizeDefaultReasoningEffort(value[DEFAULT_REASONING_EFFORT_FIELD]) !== normalizeDefaultReasoningEffort(previous[DEFAULT_REASONING_EFFORT_FIELD])) ctx.llm.emitAdaptersUpdated?.()
+  }), 'codex-subscription: default reasoning effort')
+  ctx.effect(() => {
+    const lifetime = new AbortController()
+    const defaults = withDefaultReasoningEffort(ultra.wrapAdapter(observeAdapter(reasoning.wrapAdapter(compaction.wrapAdapter(provider.wrapRetryAdapter(adapter))), provider)), {
+      preference: () => settings.get()[DEFAULT_REASONING_EFFORT_FIELD],
+      modelDefault: id => modelCatalog.metadata(id)?.defaultReasoningEffort,
+    })
+    const readyAdapter = withModelCatalogReady(hiddenDirectory.wrap(defaults), modelCatalog, { signal: lifetime.signal })
+    const disposeAdapter = ctx.llm.registerAdapter([PROVIDER], readyAdapter)
+    // Defer credential work until the synchronous apply() has installed resolveAuth.
+    void Promise.resolve().then(() => modelCatalog.refresh({ signal: lifetime.signal }))
+      .catch(error => { if (!lifetime.signal.aborted) ctx.logger?.debug?.('could not refresh Codex model catalog (%s)', error?.code ?? error?.name ?? 'unknown error') })
+    return () => {
+      lifetime.abort()
+      disposeAdapter?.()
+      modelCatalog.clear()
+    }
+  }, 'codex-subscription: official model catalog')
   const currentAgent = () => ctx.get?.('agents')?.currentInitiator?.()
+  const codexFetch = createCodexFetchProvider({
+    allowed: llmProvider => fetchRouted && (settings.get().otherModels !== 'off' || (llmProvider ?? currentAgent()?.session.requestContext?.()?.provider) === PROVIDER),
+    getAuth: resolveAuth,
+    readCredential: options => store.read(PROVIDER, options),
+    resolveModel: () => {
+      const request = currentAgent()?.session.requestContext?.()
+      return request?.provider === PROVIDER ? request.model : undefined
+    },
+    resolveSessionId: () => currentAgent()?.session.id,
+    fetch: (input, init) => network.fetch('search', input, init),
+  })
+  const realFetchProviders = ctx.web.fetchProviders
+  ctx.web.registerFetchProvider?.({ ...codexFetch, available: () => fetchRouted && normalizeFetchProvider(settings.get()[FETCH_PROVIDER_FIELD]) === FETCH_PROVIDER_CODEX })
+  ctx.effect(() => {
+    const web = ctx.web
+    const configuredId = () => configuredFetchProviderId(web, ctx.loader.entries())
+    const router = createCodexFetchRouter({ registry: realFetchProviders, configuredId, mode: () => fetchRouted ? normalizeFetchProvider(settings.get()[FETCH_PROVIDER_FIELD]) : 'dsh', codex: codexFetch })
+    if (router !== undefined) {
+      try { web.fetchProviders = router } catch { /* A host without a writable registry cannot opt in. */ }
+      fetchRouted = web.fetchProviders === router
+    }
+    if (!fetchRouted) {
+      diagnosticLog.warn('fetch', 'Codex webpage reading is unavailable: DSH does not support fetch routing')
+      if (normalizeFetchProvider(settings.get()[FETCH_PROVIDER_FIELD]) === FETCH_PROVIDER_CODEX) {
+        diagnosticLog.error('fetch', 'Configured Codex webpage reading could not be activated; select DSH or update the host')
+        throw new Error('Configured Codex webpage reading could not be activated; select DSH or update the host')
+      }
+      return undefined
+    }
+    diagnosticLog.info('fetch', 'webpage reading is routed without replacing the configured DSH provider')
+    return () => { fetchRouted = false; if (web.fetchProviders === router) web.fetchProviders = realFetchProviders }
+  }, 'codex-subscription: fetch router')
   // With "other models" switched off, subscription search, images and connectors serve conversations on this plugin's own models only.
   const servesCurrentModel = () => {
     if (settings.get().otherModels !== 'off') return true
@@ -447,7 +526,7 @@ export function apply(ctx, config = {}) {
   const realSearchProviders = ctx.web.searchProviders
   const resolveDshSearch = () => realSearchProviders?.get(searchProvider.dshProviderId())
   const gateSearch = provider => gateSearchProvider(provider, {
-    allowed: () => settings.get().otherModels !== 'off' || currentAgent()?.session.requestContext?.()?.provider === PROVIDER,
+    allowed: llmProvider => settings.get().otherModels !== 'off' || (llmProvider ?? currentAgent()?.session.requestContext?.()?.provider) === PROVIDER,
     resolveDshProvider: resolveDshSearch,
   })
   const codexSearch = createCodexSearchProvider({
@@ -465,6 +544,7 @@ export function apply(ctx, config = {}) {
   const tracedCodexSearch = gateSearch({
     id: codexSearch.id,
     available: () => codexSearch.available(),
+    ready: llmProvider => codexSearch.ready(llmProvider),
     async search(request, signal) {
       const result = await codexSearch.search(request, signal)
       searchTrace('answered by Codex subscription')
@@ -546,6 +626,8 @@ export function apply(ctx, config = {}) {
     skills: () => ctx.get?.('skills'),
     commands: () => ctx.get?.('commands'),
     llm: () => ctx.llm,
+    modelMetadata: (provider, model) => provider === PROVIDER ? modelCatalog.metadata(model) : undefined,
+    historySource: createRemoteHistorySource({ query: () => ctx.get?.('sessionQuery') }),
     speed: {
       tiers: (provider, model) => provider === PROVIDER ? (modelCatalog.metadata(model)?.serviceTiers ?? []) : [],
       current: () => settings.get()[SPEED_MODE_FIELD],
@@ -556,6 +638,7 @@ export function apply(ctx, config = {}) {
     configFile: dshHomePath('state', 'codex-subscription', 'remote-config.json'),
     voice: { WebSocket, fetch: (input, init) => network.fetch('remote', input, init), credentials: signal => readSubscriptionCredentials(resolveAuth, options => store.read(PROVIDER, { ...options, signal }), signal) },
   })
+  ctx.effect(() => () => remoteBridge.close())
   const remoteControl = createRemoteControl({
     credentials: signal => readSubscriptionCredentials(resolveAuth, options => store.read(PROVIDER, { ...options, signal }), signal),
     WebSocket,
@@ -686,6 +769,23 @@ export function apply(ctx, config = {}) {
     expirySkewMs: OAUTH_EXPIRY_SKEW_MS,
     activeReader: baseUsageReader,
   })
+  const desktopVoice = withEndCallTool(remoteBridge.desktopVoice, tool => ctx.tools.register(tool))
+  const nativeVoice = createNativeVoiceHost({ desktopVoice, log: diagnosticLog })
+  ctx.effect(() => {
+    const close = () => { void nativeVoice.close().catch(() => diagnosticLog.warn('voice-native', 'native call cleanup is waiting for a cancelled start')) }
+    const sync = () => { if (settings.get().voiceCall !== 'on') close() }
+    const unwatch = settings.watch(sync)
+    return () => { unwatch(); close() }
+  })
+  const voicePreview = createVoicePreview({ fetch: (input, init) => network.fetch('voice', input, init, { standardHttps: true }), credentials: signal => readSubscriptionCredentials(resolveAuth, options => store.read(PROVIDER, { ...options, signal }), signal), userAgent: USER_AGENT })
+  ctx.effect(() => () => voicePreview.clear())
+  const composerPredictions = createComposerPredictions({
+    fetch: (input, init) => network.fetch('predictions', input, init, { standardHttps: true }),
+    credentials: signal => readSubscriptionCredentials(resolveAuth, options => store.read(PROVIDER, { ...options, signal }), signal),
+    enabled: () => settings.get().composerPredictions === 'on', userAgent: USER_AGENT,
+  })
+  ctx.effect(() => () => composerPredictions.clear())
+  ctx.effect(() => settings.watch(value => { if (value.composerPredictions !== 'on') composerPredictions.clear() }))
   const subscriptionHandler = createSubscriptionRpcHandler({
     authHandler: createCodexRpcHandler(coordinator, { openExternal: openCodexAuthUrl }),
     usageReader,
@@ -697,9 +797,11 @@ export function apply(ctx, config = {}) {
     defaultModel,
     runtimeManagement,
     remoteControl,
-    desktopVoice: withEndCallTool(remoteBridge.desktopVoice, tool => ctx.tools.register(tool)),
-    voicePreview: createVoicePreview({ fetch: (input, init) => network.fetch('remote', input, init), credentials: signal => readSubscriptionCredentials(resolveAuth, options => store.read(PROVIDER, { ...options, signal }), signal), userAgent: USER_AGENT }),
-    onAccountChanged: () => { connectorsClient.clear(); usageProfileReader.clear(); quotaRetryHandler.notifyAccountChanged() },
+    desktopVoice,
+    nativeVoice,
+    voicePreview,
+    composerPredictions,
+    onAccountChanged: () => { connectorsClient.clear(); usageProfileReader.clear(); voicePreview.clear(); composerPredictions.clear(); quotaRetryHandler.notifyAccountChanged() },
     diagnosticsReader: () => createSubscriptionDiagnostics({ auth, preferences, login: coordinator.supportState(), network, modelCatalog, connection, compaction, review: provider, operations: diagnosticOperations, runtimeManagement, storage: () => usageReader.storage(), tools: ctx.tools }),
     onCleanupFailure: () => diagnosticOperations.record('account/cleanup', 'failed'),
     modelCatalog,
@@ -712,9 +814,6 @@ export function apply(ctx, config = {}) {
   })
 
   const handler=diagnosticOperations.wrap((endpoint,payload,signal)=>endpoint.startsWith('sketch/')?sketchBridge.rpc(endpoint,payload):subscriptionHandler(endpoint,payload,signal))
-  ctx.effect(() => {
-    void modelCatalog.refresh().catch(error => ctx.logger?.debug?.('could not refresh Codex model catalog: %s', error.message))
-  }, 'codex-subscription: official model catalog')
 
   ctx.inject(['connection'], connectionContext => connectionContext.effect(
     () => registerSubscriptionTransport(connectionContext.connection, handler),

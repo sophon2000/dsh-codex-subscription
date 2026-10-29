@@ -6,15 +6,22 @@ import { testFiles } from '../scripts/test-groups.mjs'
 
 const script = fileURLToPath(new URL('../scripts/ci-change-plan.mjs', import.meta.url))
 
-function plan(files, packageVersion = '1.10.0', publishedVersion = '1.10.0') {
+function plan(files, packageVersion = '1.10.0', publishedVersion = '1.10.0', event = 'push') {
   return spawnSync(process.execPath, [
     script,
     '--base', 'HEAD',
     '--files', files.join(','),
     '--package-version', packageVersion,
     '--published', publishedVersion,
-  ], { encoding: 'utf8' })
+  ], { encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_NAME: event } })
 }
+
+test('manual validation runs every gate even when the last commit only changed a test', () => {
+  const result = plan(['tests/remote-history-source.test.mjs'], '1.10.0', '1.10.0', 'workflow_dispatch')
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout).plan, { behavior: true, delivery: true, manager: true, official: true, runtime: true })
+  assert.notEqual(plan([], '1.9.0', '1.10.0', 'workflow_dispatch').status, 0)
+})
 
 test('documentation and marketplace screenshot changes run delivery checks without pretending runtime changed', () => {
   for (const file of ['README.md', 'README.en.md', 'CONTRIBUTING.md', 'screenshots.json']) {
@@ -44,7 +51,7 @@ test('previously omitted suites and future behavior tests reach their CI gate', 
 })
 
 test('test dispatch changes exercise all CI gates', () => {
-  for (const file of ['scripts/test-groups.mjs', 'scripts/run-tests.mjs', '.github/scripts/accept-official-release.ps1', '.github/scripts/test-official-runtime.mjs']) {
+  for (const file of ['scripts/test-groups.mjs', 'scripts/run-tests.mjs', '.github/scripts/accept-official-release.ps1', '.github/scripts/test-official-runtime.mjs', '.github/scripts/prepare-official-test-dependencies.mjs']) {
     const result = plan([file])
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(result.stdout).plan, {
@@ -53,10 +60,18 @@ test('test dispatch changes exercise all CI gates', () => {
   }
 })
 
-test('runtime changes cannot remain on the already-published version', () => {
+test('unreleased runtime changes keep all acceptance gates at the current stable version', () => {
   const result = plan(['src/index.js'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout).plan, {
+    behavior: true, delivery: true, manager: false, official: true, runtime: true,
+  })
+})
+
+test('runtime metadata cannot lag behind the published stable version', () => {
+  const result = plan(['src/index.js'], '1.9.0')
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /package\.json is still 1\.10\.0/u)
+  assert.match(result.stderr, /package\.json 1\.9\.0 is behind published 1\.10\.0/u)
 })
 
 test('a versioned runtime change runs behavior and installed-product acceptance', () => {

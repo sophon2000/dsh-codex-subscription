@@ -2,6 +2,8 @@ import { CHANNEL, unwrap } from './rpc-contract.js'
 import { normalizeReasoningCache } from './preference-fields.js'
 import {
   AUTO_QUOTA_RETRY_FIELD,
+  DEFAULT_REASONING_EFFORT_FIELD,
+  normalizeDefaultReasoningEffort,
   clampModelContext,
   CONTEXT_MODE_FIELD,
   DISABLED_MODELS_FIELD,
@@ -37,6 +39,8 @@ import {
   OUTPUT_VERBOSITY_FIELD,
   QUICK_QUOTA_MODE_FIELD,
   SEARCH_PROVIDER_FIELD,
+  FETCH_PROVIDER_FIELD,
+  normalizeFetchProvider,
   SPEED_MODE_FIELD,
 } from './settings-contract.js'
 import { readCapabilitySettings, CUSTOM_CONTEXT_OVERRIDES_FIELD } from './capability-settings.js'
@@ -55,6 +59,7 @@ export function createPreferenceController(rpc) {
   let verbosityModels = []
   let fastModels
   let ultrafastModels = []
+  let ultraModels = []
   let catalogStatus
   let modelsLoading = false
   let modelError = false
@@ -63,6 +68,7 @@ export function createPreferenceController(rpc) {
   let disposed = false
   let subagentBackendAvailable = false
   let subagentRuntimeInstalled = false
+  let fetchRoutingAvailable = false
   let restartRequired = false
 
   const sameModels = (left, right) => left.length === right.length
@@ -79,9 +85,11 @@ export function createPreferenceController(rpc) {
       connectionMode: value?.connectionMode === 'websocket' ? 'websocket' : 'sse',
       reviewModel: value?.reviewModel === 'official' ? 'official' : 'session',
       remoteControl: value?.remoteControl === 'on' ? 'on' : 'off',
+      composerPredictions: value?.composerPredictions === 'on' ? 'on' : 'off',
       otherModels: value?.otherModels === 'off' ? 'off' : 'on',
       compactionMode: value?.compactionMode === 'cloud' ? 'cloud' : 'dsh',
       reasoningCache: normalizeReasoningCache(value?.reasoningCache),
+      defaultReasoningEffort: normalizeDefaultReasoningEffort(value?.[DEFAULT_REASONING_EFFORT_FIELD]),
       subagentBackend: value?.subagentBackend === 'codex' ? 'codex' : 'dsh',
       subagentBackendAvailable,
       subagentRuntimeInstalled,
@@ -90,6 +98,8 @@ export function createPreferenceController(rpc) {
         value?.[LEGACY_QUICK_QUOTA_FIELD],
       ),
       searchProvider: normalizeSearchProvider(value?.[SEARCH_PROVIDER_FIELD]),
+      fetchProvider: normalizeFetchProvider(value?.[FETCH_PROVIDER_FIELD]),
+      fetchRoutingAvailable,
       speedMode: normalizeSpeedMode(value?.[SPEED_MODE_FIELD]),
       outputVerbosity: normalizeOutputVerbosity(value?.[OUTPUT_VERBOSITY_FIELD]),
       inputImageDetail: normalizeInputImageDetail(value?.[INPUT_IMAGE_DETAIL_FIELD]),
@@ -112,6 +122,7 @@ export function createPreferenceController(rpc) {
       verbosityModels,
       fastModels,
       ultrafastModels,
+      ultraModels,
       catalogStatus,
       modelsLoading,
       modelError,
@@ -126,20 +137,26 @@ export function createPreferenceController(rpc) {
   let snapshot = read()
   const listeners = new Set()
   const publish = () => {
+    if (disposed) return
     snapshot = read()
-    for (const listener of listeners) listener()
+    for (const listener of [...listeners]) {
+      if (disposed) break
+      listener()
+    }
   }
   const acceptFallback = value => {
     // Sticky until the page reloads: the host kept the written value on disk but not in the running settings.
     if (value?.liveSynced === false) restartRequired = true
     subagentBackendAvailable = value?.subagentBackendAvailable === true
     subagentRuntimeInstalled = value?.subagentRuntimeInstalled === true
+    fetchRoutingAvailable = value?.fetchRoutingAvailable === true
     if (!modelRefreshStarted) {
       contextModels = Array.isArray(value?.contextModels) ? value.contextModels : []
       availableModels = Array.isArray(value?.availableModels) ? value.availableModels : []
       verbosityModels = Array.isArray(value?.verbosityModels) ? value.verbosityModels : []
       fastModels = Array.isArray(value?.fastModels) ? value.fastModels : undefined
       ultrafastModels = Array.isArray(value?.ultrafastModels) ? value.ultrafastModels : []
+      ultraModels = Array.isArray(value?.ultraModels) ? value.ultraModels : []
       catalogStatus = value?.catalogStatus
     }
     fallback = {
@@ -150,10 +167,12 @@ export function createPreferenceController(rpc) {
         connectionMode: value?.connectionMode === 'websocket' ? 'websocket' : 'sse',
         reviewModel: value?.reviewModel === 'official' ? 'official' : 'session',
         remoteControl: value?.remoteControl === 'on' ? 'on' : 'off',
+        composerPredictions: value?.composerPredictions === 'on' ? 'on' : 'off',
         otherModels: value?.otherModels === 'off' ? 'off' : 'on',
       otherModels: value?.otherModels === 'off' ? 'off' : 'on',
         compactionMode: value?.compactionMode === 'cloud' ? 'cloud' : 'dsh',
         reasoningCache: normalizeReasoningCache(value?.reasoningCache),
+        [DEFAULT_REASONING_EFFORT_FIELD]: normalizeDefaultReasoningEffort(value?.[DEFAULT_REASONING_EFFORT_FIELD]),
         subagentBackend: value?.subagentBackend === 'codex' ? 'codex' : 'dsh',
         ...readCapabilitySettings(value),
         [QUICK_QUOTA_MODE_FIELD]: normalizeQuickQuotaMode(
@@ -161,6 +180,7 @@ export function createPreferenceController(rpc) {
           value?.[LEGACY_QUICK_QUOTA_FIELD],
         ),
         [SEARCH_PROVIDER_FIELD]: normalizeSearchProvider(value?.[SEARCH_PROVIDER_FIELD]),
+        [FETCH_PROVIDER_FIELD]: normalizeFetchProvider(value?.[FETCH_PROVIDER_FIELD]),
         [SPEED_MODE_FIELD]: normalizeSpeedMode(value?.[SPEED_MODE_FIELD]),
         [OUTPUT_VERBOSITY_FIELD]: normalizeOutputVerbosity(value?.[OUTPUT_VERBOSITY_FIELD]),
         [INPUT_IMAGE_DETAIL_FIELD]: normalizeInputImageDetail(value?.[INPUT_IMAGE_DETAIL_FIELD]),
@@ -179,12 +199,14 @@ export function createPreferenceController(rpc) {
     }
   }
   const load = async () => {
+    if (disposed) return
     const current = ++generation
     updating = false
     pendingPatch = undefined
     fallback = undefined
     error = false
     publish()
+    if (disposed || current !== generation) return
     try {
       const value = unwrap(await rpc.call(CHANNEL, 'preferences/status', {}))
       if (current !== generation || disposed) return
@@ -196,11 +218,13 @@ export function createPreferenceController(rpc) {
     }
   }
   const refreshModels = async () => {
+    if (disposed) return false
     const current = ++modelRefreshGeneration
     modelRefreshStarted = true
     modelError = false
     modelsLoading = true
     publish()
+    if (disposed || current !== modelRefreshGeneration) return false
     try {
       const value = unwrap(await rpc.call(CHANNEL, 'preferences/models', {}))
       if (disposed || current !== modelRefreshGeneration) return false
@@ -209,18 +233,21 @@ export function createPreferenceController(rpc) {
       const nextVerbosityModels = Array.isArray(value?.verbosityModels) ? value.verbosityModels : []
       const nextFastModels = Array.isArray(value?.fastModels) ? value.fastModels : undefined
       const nextUltrafastModels = Array.isArray(value?.ultrafastModels) ? value.ultrafastModels : []
+      const nextUltraModels = Array.isArray(value?.ultraModels) ? value.ultraModels : []
       catalogStatus = value?.catalogStatus
       const changed = !sameModels(contextModels, nextContextModels)
         || !sameModels(availableModels, nextAvailableModels)
         || !sameModels(verbosityModels, nextVerbosityModels)
         || JSON.stringify(fastModels) !== JSON.stringify(nextFastModels)
         || JSON.stringify(ultrafastModels) !== JSON.stringify(nextUltrafastModels)
+        || JSON.stringify(ultraModels) !== JSON.stringify(nextUltraModels)
       if (changed) {
         contextModels = nextContextModels
         availableModels = nextAvailableModels
         verbosityModels = nextVerbosityModels
         fastModels = nextFastModels
         ultrafastModels = nextUltrafastModels
+        ultraModels = nextUltraModels
         publish()
       }
       return changed
@@ -243,6 +270,7 @@ export function createPreferenceController(rpc) {
     error = false
     failedPatch = undefined
     publish()
+    if (disposed || current !== generation) return
     try {
       const value = unwrap(await rpc.call(CHANNEL, 'preferences/update', patch))
       if (current !== generation) return
@@ -265,6 +293,7 @@ export function createPreferenceController(rpc) {
   return {
     getSnapshot: () => snapshot,
     subscribe: listener => {
+      if (disposed) return () => {}
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
@@ -273,9 +302,11 @@ export function createPreferenceController(rpc) {
     retry: () => failedPatch === undefined ? load() : set(failedPatch),
     refreshModels,
     dispose: () => {
+      if (disposed) return
       disposed = true
       generation += 1
       modelRefreshGeneration += 1
+      listeners.clear()
     },
   }
 }

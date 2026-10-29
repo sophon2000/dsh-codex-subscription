@@ -13,6 +13,8 @@ import { searchFiles } from './remote-control-files.js'
 import { createRealtimeVoice, createVoiceCall, desktopInstructions } from './remote-control-realtime.js'
 import { diagnosticLog } from './diagnostic-log.js'
 import { phoneLog } from './remote-control-log.js'
+import { phoneModelUpgrade, phoneRateLimits } from './remote-control-capabilities.js'
+import { historyIndex, historyPage, initialHistoryCursor } from './remote-history-page.js'
 import { rememberRemoteImage, withRemoteImageOutput } from './remote-control-image-output.js'
 
 /** A folder the phone named, only when it is an existing absolute folder on this machine. */
@@ -72,20 +74,6 @@ function page(list, params) {
 }
 
 /** Codex usage as the phone's rate-limit snapshot (primary and secondary windows of the main limit). */
-function rateLimits(read) {
-  const toWindow = entry => entry && ({ usedPercent: Math.round(entry.usedPercent), windowDurationMins: Math.round(entry.windowSeconds / 60), resetsAt: entry.resetsAt ?? null })
-  const snapshot = limit => ({
-    limitId: limit?.id ?? 'codex', limitName: limit?.name ?? null, normalModelSlug: null,
-    primary: toWindow(limit?.windows?.[0]) ?? null, secondary: toWindow(limit?.windows?.[1]) ?? null,
-    credits: null, individualLimit: null, spendControlReached: read?.spendControlReached ?? null, planType: read?.planType ?? null, rateLimitReachedType: read?.rateLimitReachedType ?? null,
-  })
-  const main = read?.rateLimits?.find(limit => limit.id === 'codex') ?? read?.rateLimits?.[0]
-  return {
-    ordinaryUsageAllowed: null, rateLimits: snapshot(main),
-    rateLimitsByLimitId: read ? Object.fromEntries((read.rateLimits ?? []).map(limit => [limit.id, snapshot(limit)])) : null,
-    rateLimitResetCredits: null, accountId: null, rateLimitUpsell: null,
-  }
-}
 
 /** First place `term` appears in `text`: a short passage around it and the match's UTF-16 range inside that passage. */
 export function occurrence(text, term, radius = 60) {
@@ -195,7 +183,7 @@ export const typedImages = message => message.role === 'user' && (message.source
   : []
 
 /** `imageUrls` maps an attachment id to a data URL the phone can show; images without one are left out. */
-export function projectTurns(messages, at = Date.now(), imageUrls = new Map(), cwd = undefined, imageAssets = new Map()) {
+export function projectTurns(messages, at = Date.now(), imageUrls = new Map(), cwd = undefined, imageAssets = new Map(), indexOnly = false) {
   const turns = []
   let turn
   const calls = new Map()
@@ -206,12 +194,12 @@ export function projectTurns(messages, at = Date.now(), imageUrls = new Map(), c
       // Keep the URL-shaped user-input representation consumed by older clients.
       // The durable file identity stays in the account-scoped asset cache.
       const pictures = typedImages(message).map(block => imageAssets.get(block.attachment.attachmentId)?.downloadUrl ?? imageUrls.get(block.attachment.attachmentId)).filter(Boolean)
-      if (text === '' && pictures.length === 0) continue
+      if (text === '' && pictures.length === 0 && !(indexOnly && typedImages(message).length)) continue
       close()
       turn = { ...emptyTurn(), id: message.id, startedAt: seconds(at) }
       turn.items.push({ type: 'userMessage', id: message.id, clientId: null, content: [...(text === '' ? [] : [{ type: 'text', text, text_elements: [] }]), ...pictures.map(url => ({ type: 'image', url }))] })
     } else if (message.role === 'assistant') {
-      turn ??= { ...emptyTurn(), startedAt: seconds(at) }
+      turn ??= { ...emptyTurn(), id: message.id, startedAt: seconds(at) }
       for (const [index, block] of message.content.entries()) {
         const id = `${message.id}:${index}`
         if (block.type === 'text') turn.items.push({ type: 'agentMessage', id, text: block.text, phase: null, memoryCitation: null, delivery: null })
@@ -284,11 +272,12 @@ export function createPhoneConfig(file) {
   }
 }
 
-export function createDshRemoteControl({ controller, agents, permissions = () => undefined, workspaces = () => undefined, attachments = () => undefined, remoteImages = undefined, imagePublishMs = 20000, usage = () => undefined, usageProfile = () => undefined, projections = () => undefined, skills = () => undefined, commands = () => undefined, llm = () => undefined, speed = undefined, trace = () => {}, phoneReturnMs = PHONE_RETURN_MS, userAgent, appServerUserAgent = userAgent, configFile = undefined, voice = undefined }) {
+export function createDshRemoteControl({ controller, agents, permissions = () => undefined, workspaces = () => undefined, attachments = () => undefined, remoteImages = undefined, imagePublishMs = 20000, usage = () => undefined, usageProfile = () => undefined, projections = () => undefined, skills = () => undefined, commands = () => undefined, llm = () => undefined, modelMetadata = () => undefined, historySource = undefined, speed = undefined, trace = () => {}, phoneReturnMs = PHONE_RETURN_MS, userAgent, appServerUserAgent = userAgent, configFile = undefined, voice = undefined }) {
   const subscribers = new Map() // threadId -> Set<notify>
   const threadSources = new Map() // threadId -> the source the phone named when it created the thread ("user", "realtime_voice", ...)
   const active = new Map() // threadId -> { turn }
   const queues = new Map() // threadId -> QueuedSubmission[]
+  const starting = new Map() // synchronous admission reservations, before the first await
   let catalog
 
   const service = () => {
@@ -396,11 +385,11 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       const values = projections()?.snapshot?.(session, ['tokenUsage', 'contextPressure'])?.values
       const used = values?.tokenUsage
       if (!used) return undefined
-      const breakdown = (total, input, cached, output) => ({ totalTokens: total, inputTokens: input, cachedInputTokens: cached, cacheWriteInputTokens: 0, outputTokens: output, reasoningOutputTokens: 0 })
+      const breakdown = (total, input, cached, output, written = 0) => ({ totalTokens: total, inputTokens: input, cachedInputTokens: cached, cacheWriteInputTokens: written, outputTokens: output, reasoningOutputTokens: 0 })
       const input = (used.uncachedInputTokens ?? 0) + (used.cacheReadTokens ?? 0) + (used.cacheWriteTokens ?? 0)
       const pressure = values.contextPressure?.pressureTokens ?? 0
       return {
-        total: breakdown(input + (used.outputTokens ?? 0), input, used.cacheReadTokens ?? 0, used.outputTokens ?? 0),
+        total: breakdown(input + (used.outputTokens ?? 0), input, used.cacheReadTokens ?? 0, used.outputTokens ?? 0, used.cacheWriteTokens ?? 0),
         last: breakdown(pressure, pressure, 0, 0), modelContextWindow: values.contextPressure?.contextWindow ?? null,
       }
     } catch { return undefined }
@@ -433,7 +422,8 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     await Promise.all(wanted.map(async block => {
       const started = Date.now()
       try {
-        const stored = await store.readImage(block.attachment, AbortSignal.timeout(10_000))
+        const timeout = AbortSignal.timeout(10_000)
+        const stored = await store.readImage(block.attachment, parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout)
         urls.set(block.attachment.attachmentId, `data:${stored.ref.mediaType};base64,${Buffer.from(stored.data).toString('base64')}`)
         phoneLog('image read completed', { attachmentId: block.attachment.attachmentId, bytes: stored.data.byteLength, ms: Date.now() - started })
         // Publish only images read from DSH's attachment service, including the
@@ -512,6 +502,82 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     phoneLog('history restore completed', { threadId: id, ms: Date.now() - started, items: messages.length, turns: result.thread.turns.length, images: imageUrls.size })
     return result
   }
+  const historyIndexes = new WeakMap()
+  const historySnapshot = async (id, signal) => {
+    signal?.throwIfAborted()
+    let source
+    try { source = await historySource?.read(id, { signal }) }
+    catch (error) { if (error?.code === 'SESSION_QUERY_SESSION_NOT_FOUND') throw notFound(id); throw error }
+    const agent = source ? undefined : await agentFor(id)
+    const session = agent?.session
+    const messages = source?.messages ?? session.deriveMessages()
+    const meta = source?.meta ?? session.meta
+    const events = source?.events
+    const cwd = directoryOf(events ? { meta, snapshotEvents: () => events } : session)
+    const owner = events && Object.isFrozen(events) ? events : session ?? messages
+    const revision = source?.cursor ?? session?.seq ?? messages
+    let cached = historyIndexes.get(owner)
+    if (!cached || cached.revision !== revision) {
+      cached = { revision, ranges: historyIndex(messages, projectTurns(messages, meta?.createdAt, new Map(), cwd, new Map(), true)) }
+      historyIndexes.set(owner, cached)
+    }
+    const live = active.get(id)
+    if (live?.userItem) for (const message of messages) reconcileUser(id, live, message)
+    const outline = withLiveTurn(id, cached.ranges)
+    return { meta, messages, cwd, ranges: cached.ranges, outline }
+  }
+  const renderHistory = async (id, snapshot, selected, signal) => {
+    signal?.throwIfAborted()
+    const wanted = new Set(selected.map(turn => turn.id))
+    const ranges = snapshot.ranges.filter(range => wanted.has(turnAliases.get(`${id}\0${range.id}`) ?? range.id))
+    const messages = ranges.flatMap(range => snapshot.messages.slice(range.from, range.to))
+    const { urls, assets } = await imageUrlsOf(messages, signal)
+    signal?.throwIfAborted()
+    const turns = ranges.flatMap(range => projectTurns(snapshot.messages.slice(range.from, range.to), snapshot.meta?.createdAt, urls, snapshot.cwd, assets, true))
+    const visible = wanted.has(active.get(id)?.turn.id) ? withLiveTurn(id, turns) : withShownIds(id, turns)
+    const byId = new Map(visible.map(turn => [turn.id, turn]))
+    return selected.map(turn => byId.get(turn.id)).filter(Boolean)
+  }
+  const listHistoryTurns = async (params, signal) => {
+    if (params?.itemsView != null && !['full', 'summary', 'notLoaded'].includes(params.itemsView)) throw invalidParams('Invalid turn items view')
+    const id = params?.threadId
+    const snapshot = await historySnapshot(id, signal)
+    const result = historyPage(snapshot.outline, params, JSON.stringify([id, 'turns']))
+    // Legacy callers receive full turns. Explicit lightweight reads do not read
+    // attachments and say notLoaded so the client can request item pages.
+    const full = params?.itemsView == null || params.itemsView === 'full'
+    const turns = full ? await renderHistory(id, snapshot, result.data, signal) : result.data.map(turn => ({ ...turn, items: [], itemsView: 'notLoaded' }))
+    const data = turns.map(({ from, to, ...turn }) => turn)
+    phoneLog('history page completed', { threadId: id, type: full ? 'full' : 'notLoaded', turns: data.length })
+    return { ...result, data }
+  }
+  const listHistoryItems = async (params, signal) => {
+    const id = params?.threadId
+    if (params?.turnId != null && (typeof params.turnId !== 'string' || params.turnId === '')) throw invalidParams('turnId must be nonempty')
+    const snapshot = await historySnapshot(id, signal)
+    const turns = snapshot.outline
+    if (params?.turnId && !turns.some(turn => turn.id === params.turnId)) throw invalidParams('Turn not found')
+    let items = turns.flatMap(turn => turn.items.map(item => ({ id: JSON.stringify([turn.id, item.id]), turnId: turn.id, itemId: item.id })))
+    let cursor = params?.cursor
+    if (cursor && typeof cursor === 'object') {
+      if (cursor.type !== 'item' || typeof cursor.itemId !== 'string' || !cursor.itemId || !params.turnId) throw invalidParams('An item anchor requires a turnId and itemId')
+      const at = items.findIndex(item => item.itemId === cursor.itemId && item.turnId === params.turnId)
+      if (at < 0) throw invalidParams('Item anchor not found in this turn')
+      items = params?.sortDirection === 'desc' ? items.slice(0, at) : items.slice(at + 1)
+      cursor = undefined
+    }
+    phoneLog('history items page requested', { threadId: id, turnId: params?.turnId,
+      direction: ['asc', 'desc'].includes(params?.sortDirection) ? params.sortDirection : 'default',
+      type: params?.cursor && typeof params.cursor === 'object' ? 'itemAnchor' : params?.cursor ? 'opaqueCursor' : 'firstPage' })
+    const result = historyPage(items, { ...params, cursor }, JSON.stringify([id, 'items']), 'asc', item => !params?.turnId || item.turnId === params.turnId)
+    const wanted = new Set(result.data.map(item => item.turnId))
+    const rendered = await renderHistory(id, snapshot, turns.filter(turn => wanted.has(turn.id)), signal)
+    const byTurn = new Map(rendered.map(turn => [turn.id, new Map(turn.items.map(item => [item.id, item]))]))
+    return { ...result, data: result.data.flatMap(entry => {
+      const item = byTurn.get(entry.turnId)?.get(entry.itemId)
+      return item ? [{ turnId: entry.turnId, item, startedAt: null, completedAt: null }] : []
+    }) }
+  }
   /** Apply a model or effort the phone picked; DSH validates it against its own catalog. */
   // Speed: the plugin keeps one speed setting (standard, fast, ultrafast); the phone's service tier is that setting.
   const TIER_OF = { fast: 'priority', ultrafast: 'ultrafast' }
@@ -589,7 +655,23 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     return { text, pictures, content: [...(text === '' ? [] : [{ type: 'text', text }]), ...images] }
   }
 
-  async function startTurn(params, notify) {
+  async function startTurn(params, notify, queued) {
+    const id = params?.threadId
+    if (active.has(id) || starting.has(id)) throw invalidParams('A turn is already running in this conversation')
+    const launch = { queued, submitted: false, abort: new AbortController() }
+    starting.set(id, launch)
+    try { return await acceptTurn(params, notify, launch) }
+    catch (error) { if (launch.abort.signal.aborted && error?.name === 'AbortError') throw new RpcError(-32800, 'Turn start cancelled'); throw error }
+    finally { if (starting.get(id) === launch) starting.delete(id) }
+  }
+
+  async function startQueuedTurn(id, notify, queuedId, selection = {}) {
+    const queued = (queues.get(id) ?? []).find(entry => queuedId == null || entry.id === queuedId)
+    if (!queued) throw invalidParams('Nothing queued')
+    return startTurn({ ...selection, threadId: id, input: queued.input, clientUserMessageId: queued.clientUserMessageId }, notify, queued)
+  }
+
+  async function acceptTurn(params, notify, launch) {
     const { text, pictures, content } = contentOf(params?.input)
     lastPrompt.text = text
     const id = params?.threadId
@@ -601,10 +683,16 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     // serviceTier sticks like the model; serviceTierForTurn is for this turn only and is put back afterwards.
     const speedBefore = speed?.current?.()
     const speedForTurn = typeof params?.serviceTierForTurn === 'string' ? params.serviceTierForTurn : undefined
-    await applySpeed(speedForTurn ?? (Object.hasOwn(params ?? {}, 'serviceTier') ? params.serviceTier : undefined))
+    const restoreSpeed = async () => { if (speedForTurn !== undefined && speedBefore !== undefined && speed?.current?.() !== speedBefore) await Promise.resolve(speed.set?.(speedBefore)).catch(() => {}) }
+    try {
+      await applySpeed(speedForTurn ?? (Object.hasOwn(params ?? {}, 'serviceTier') ? params.serviceTier : undefined))
+      launch.abort.signal.throwIfAborted()
+      if (active.has(id)) throw invalidParams('A turn is already running in this conversation')
+      if (launch.queued && !(queues.get(id) ?? []).includes(launch.queued)) throw invalidParams('Queued submission was deleted before starting')
+    } catch (error) { await restoreSpeed(); throw error }
     const turn = emptyTurn()
     const userItem = { type: 'userMessage', id: randomUUID(), clientId: params.clientUserMessageId ?? null, content: [...(text === '' ? [] : [{ type: 'text', text, text_elements: [] }]), ...pictures.map(picture => ({ type: 'image', url: picture.url }))] }
-    const running = { turn, ended: undefined, userItem, priorMessageIds: new Set(agent.session.deriveMessages().map(message => message.id)), pendingImages: new Set(), abort: new AbortController() }
+    const running = { turn, ended: undefined, userItem, priorMessageIds: new Set(agent.session.deriveMessages().map(message => message.id)), pendingImages: new Set(), pendingSteers: new Set(), abort: launch.abort }
     active.set(id, running)
     phoneLog('turn accepted', { threadId: id, turnId: turn.id, itemId: userItem.id, hasClientId: userItem.clientId !== null, images: pictures.length })
     emit(id, 'turn/started', { threadId: id, turn })
@@ -613,18 +701,51 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     emit(id, 'item/started', { threadId: id, turnId: turn.id, item: userItem, startedAtMs: Date.now() })
     emit(id, 'item/completed', { threadId: id, turnId: turn.id, item: userItem, completedAtMs: Date.now() })
     try {
-      await service().prompt({ requestId: randomUUID(), sessionId: id, mode: 'queue', content }, AbortSignal.timeout(30_000))
+      launch.submitted = true
+      const admitted = await service().prompt({ requestId: launch.queued?.id ?? randomUUID(), sessionId: id, mode: 'queue', content }, AbortSignal.any([running.abort.signal, AbortSignal.timeout(30_000)]))
+      if (admitted?.accepted === false) throw new Error('DSH rejected the message')
     } catch (error) {
-      active.delete(id)
+      if (active.get(id) === running) active.delete(id)
+      const cancelled = running.abort.signal.aborted
+      turn.status = cancelled ? 'interrupted' : 'failed'
+      turn.completedAt = seconds(Date.now())
+      turn.error = cancelled ? null : { message: 'DSH did not accept the message', codexErrorInfo: null, additionalDetails: null }
+      running.abort.abort()
+      emit(id, 'turn/completed', { threadId: id, turn })
+      emit(id, 'thread/status/changed', { threadId: id, status: { type: 'idle' } })
+      await restoreSpeed()
+      if (cancelled) throw new RpcError(-32800, 'Turn start cancelled')
       throw new RpcError(-32603, error?.message ? `DSH did not accept the message: ${String(error.message).slice(0, 200)}` : 'DSH did not accept the message')
     }
+    // Admission can await I/O. Remove only this accepted identity from the latest
+    // queue, preserving concurrent reorder, additions and deletion of other items.
+    if (launch.queued) {
+      queues.set(id, (queues.get(id) ?? []).filter(entry => entry.id !== launch.queued.id))
+      emit(id, 'thread/queue/changed', { threadId: id })
+    }
+    // The host can finish attachment admission after an interrupt despite its
+    // RPC signal. Cancel once more after the accepted message actually exists.
+    if (running.abort.signal.aborted) {
+      running.ended ??= { kind: 'aborted' }
+      await Promise.resolve(service().cancel({ sessionId: id })).catch(() => {})
+    }
+    if (starting.get(id) === launch) starting.delete(id)
     void Promise.resolve(agent.whenIdle?.()).catch(() => {}).then(async () => {
+      running.finishing = true
+      const pendingSteers = [...running.pendingSteers]
+      if (pendingSteers.length) {
+        await Promise.allSettled(pendingSteers)
+        // Late host admission may briefly start a new driver after the first
+        // idle observation. Do not drain the next queued turn until it stops.
+        await Promise.resolve(agent.whenIdle?.()).catch(() => {})
+      }
       // Tool image reads can outlast the model. Finish them before publishing the final turn.
       if (running.pendingImages.size) phoneLog('waiting for tool images', { threadId: id, turnId: turn.id, pending: running.pendingImages.size })
       await Promise.allSettled([...running.pendingImages])
+      if (active.get(id) !== running) return
       turn.items = withRemoteImageOutput(turn).items
       // Report how DSH closed the turn, so model or credential failures reach the phone.
-      const reason = active.get(id)?.ended
+      const reason = running.ended
       turn.status = reason?.kind === 'error' ? 'failed' : reason?.kind === 'aborted' || reason?.kind === 'interrupted' ? 'interrupted' : 'completed'
       if (reason?.kind === 'error') {
         const message = String(reason.error?.message ?? reason.error?.code ?? 'The model request failed').slice(0, 500)
@@ -638,18 +759,14 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
         for (const message of agent.session.deriveMessages()) reconcileUser(id, running, message)
       } catch { /* the phone then simply reads DSH's own id */ }
       active.delete(id)
+      running.abort.abort()
       compactions.delete(id)
       const usageNow = tokenUsage(agent.session)
       if (usageNow) emit(id, 'thread/tokenUsage/updated', { threadId: id, turnId: turn.id, tokenUsage: usageNow })
       emit(id, 'turn/completed', { threadId: id, turn })
       phoneLog('turn completed', { threadId: id, turnId: turn.id, status: turn.status, items: turn.items.length })
       emit(id, 'thread/status/changed', { threadId: id, status: { type: 'idle' } })
-      const [next, ...rest] = queues.get(id) ?? []
-      if (next) {
-        queues.set(id, rest)
-        emit(id, 'thread/queue/changed', { threadId: id })
-        void startTurn({ threadId: id, input: next.input, clientUserMessageId: next.clientUserMessageId }, notify).catch(() => {})
-      }
+      if (queues.get(id)?.length) void startQueuedTurn(id, notify).catch(error => phoneLog('queued turn not accepted', { threadId: id, code: error?.code }, 'warn'))
     })
     // Match app-server: acknowledge the turn only. The user message arrives through item notifications,
     // linked to the phone's optimistic submission by clientId, rather than inserted a second time here.
@@ -678,6 +795,12 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
         running: item.running, title: item.projections?.values?.title ?? null,
       }))
     return { threads, snippets }
+  }
+  const readThreadMetadata = async (id, signal) => {
+    const entry = (await service().list({}, signal)).items?.find(item => item.sessionId === id && item.origin !== 'subagent')
+    if (!entry) throw notFound(id)
+    return thread({ id, cwd: entry.cwd, createdAt: entry.createdAt ?? entry.updatedAt, updatedAt: entry.updatedAt,
+      running: entry.running, projectId: projectIdOf(id), title: entry.projections?.values?.title ?? null })
   }
   const matches = (entry, term, snippets) => {
     const needle = typeof term === 'string' ? term.trim().toLocaleLowerCase() : ''
@@ -735,7 +858,7 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
           data.push({
             id: key, model: key, displayName: model.name ?? model.id, description: group.name ?? '', hidden: false, isDefault: key === defaultKey,
             supportedReasoningEfforts: supported, defaultReasoningEffort: model.reasoning?.defaultEffort ?? supported[0].reasoningEffort,
-            inputModalities: modalities.get(model.id)?.length ? modalities.get(model.id) : ['text'], supportsPersonality: false, additionalSpeedTiers: tiersOf(group.id, model.id).map(tier => tier.id), upgrade: null, upgradeInfo: null, availabilityNux: null, serviceTiers: tiersOf(group.id, model.id), defaultServiceTier: null,
+            inputModalities: modalities.get(model.id)?.length ? modalities.get(model.id) : ['text'], supportsPersonality: false, additionalSpeedTiers: tiersOf(group.id, model.id).map(tier => tier.id), ...phoneModelUpgrade(modelMetadata(group.id, model.id), target => modelKey({ provider: group.id, model: target })), availabilityNux: null, serviceTiers: tiersOf(group.id, model.id), defaultServiceTier: null,
           })
         }
       }
@@ -864,12 +987,9 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       }
     },
     'currentTime/read': () => ({ currentTimeAt: seconds(Date.now()) }),
-    'account/rateLimits/read': async () => rateLimits(await usage()?.read?.().catch(() => undefined)),
-    'thread/turns/list': async params => {
-      const { thread: value } = await openThread(params?.threadId)
-      const ordered = params?.sortDirection === 'asc' ? value.turns : value.turns.toReversed()
-      return { ...page(ordered, params), backwardsCursor: ordered.length ? String(0) : null }
-    },
+    'account/rateLimits/read': async () => phoneRateLimits(await usage()?.read?.().catch(() => undefined)),
+    'thread/turns/list': (params, { signal } = {}) => listHistoryTurns(params, signal),
+    'thread/items/list': (params, { signal } = {}) => listHistoryItems(params, signal),
     'thread/fork': async (params, { notify }) => {
       const forked = await service().fork({ sessionId: params?.threadId })
       const agent = await agentFor(forked.sessionId)
@@ -918,8 +1038,22 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       await registry.unarchiveSession(params?.threadId)
       return { thread: (await openThread(params?.threadId)).thread }
     },
-    'thread/read': async (params, { signal } = {}) => ({ thread: (await openThread(params?.threadId, undefined, signal)).thread }),
+    'thread/read': async (params, { signal } = {}) => ({ thread: params?.includeTurns === false
+      ? { ...await readThreadMetadata(params?.threadId, signal), historyMode: 'paginated' }
+      : (await openThread(params?.threadId, undefined, signal)).thread }),
     'thread/resume': async (params, { notify, signal }) => {
+      if (params?.excludeTurns === true) {
+        const value = { ...await readThreadMetadata(params?.threadId, signal), historyMode: 'paginated' }
+        const snapshot = await historySnapshot(params.threadId, signal)
+        const agent = await agentFor(params.threadId)
+        if (notify) subscribe(params.threadId, notify)
+        await (catalog ? undefined : loadCatalog().catch(() => undefined))
+        const itemAnchors = snapshot.outline.flatMap(turn => turn.items.map(item => ({ id: JSON.stringify([turn.id, item.id]) })))
+        return { ...settings(agent, value.cwd), thread: value,
+          turnsBackwardsCursor: initialHistoryCursor(snapshot.outline, JSON.stringify([params.threadId, 'turns'])),
+          itemsBackwardsCursor: initialHistoryCursor(itemAnchors, JSON.stringify([params.threadId, 'items'])),
+        }
+      }
       const { agent, thread: value } = await openThread(params?.threadId, notify, signal)
       return { ...settings(agent, value.cwd), thread: value }
     },
@@ -951,7 +1085,7 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       return { ...settings(agent, value.cwd), thread: value }
     },
     'turn/start': (params, { notify }) => titles.has(params?.threadId) ? titleTurn(params, notify) : startTurn(params, notify),
-    'turn/interrupt': params => { service().cancel({ sessionId: params?.threadId }); active.get(params?.threadId)?.abort?.abort(); return {} },
+    'turn/interrupt': params => { active.get(params?.threadId)?.abort?.abort(); starting.get(params?.threadId)?.abort.abort(); service().cancel({ sessionId: params?.threadId }); return {} },
     // DSH's /compact (0.2.0-rc.2 and later): condense the older history now. It is a turn of its own, like the app's.
     'thread/compact/start': async (params, { notify }) => {
       const id = params?.threadId
@@ -959,7 +1093,7 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       const agent = await agentFor(id)
       // The same /compact the Web app runs, so it answers with DSH's own wording and keeps the session log in step.
       if (typeof registry?.execute !== 'function' || registry.find?.(agent, 'compact') === undefined) throw new RpcError(-32601, 'This DSH version cannot compact a conversation on request')
-      if (active.has(id)) throw new RpcError(-32602, 'A turn is already running in this conversation')
+      if (active.has(id) || starting.has(id)) throw new RpcError(-32602, 'A turn is already running in this conversation')
       subscribe(id, notify)
       const turn = emptyTurn()
       const abort = new AbortController()
@@ -996,10 +1130,25 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       })()
       return {}
     },
-    'turn/steer': async params => {
+    'turn/steer': async (params, { signal } = {}) => {
+      const running = active.get(params?.threadId)
+      const current = () => running && active.get(params?.threadId) === running && running.userItem && !running.finishing && !running.ended && !running.abort.signal.aborted && !starting.has(params?.threadId) && params?.expectedTurnId === running.turn.id
+      signal?.throwIfAborted()
+      if (!current()) throw invalidParams('The expected turn is not active')
       const { content } = contentOf(params?.input)
-      await service().prompt({ requestId: randomUUID(), sessionId: params?.threadId, mode: 'steer', content }, AbortSignal.timeout(30_000))
-      return { turnId: params?.expectedTurnId ?? active.get(params?.threadId)?.turn.id ?? '' }
+      const operation = (async () => {
+        const admitted = await service().prompt({ requestId: randomUUID(), sessionId: params.threadId, mode: 'steer', content }, AbortSignal.any([running.abort.signal, AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]))
+        if (admitted?.accepted === false) throw invalidParams('DSH rejected the steering message')
+        if (!current()) {
+          // Keep this turn reserved until admission settles; a late steer must
+          // not create work after its target completed or was interrupted. Its
+          // accepted acknowledgement still belongs to this actual turn ID.
+          if (active.get(params.threadId) === running) await Promise.resolve(service().cancel({ sessionId: params.threadId })).catch(() => {})
+        }
+        return { turnId: running.turn.id }
+      })()
+      running.pendingSteers.add(operation)
+      try { return await operation } finally { running.pendingSteers.delete(operation) }
     },
     'thread/name/set': async params => {
       await service().rename({ sessionId: params?.threadId, title: String(params?.name ?? '') })
@@ -1009,17 +1158,18 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
     'thread/queue/list': params => ({ data: queues.get(params?.threadId) ?? [], nextCursor: null }),
     'thread/queue/add': async (params, { notify }) => {
       if (!Array.isArray(params?.input)) throw invalidParams('input is required')
+      contentOf(params.input)
       const id = params?.threadId
       const queued = { id: randomUUID(), clientUserMessageId: String(params.clientUserMessageId ?? randomUUID()), input: params.input }
       subscribe(id, notify)
-      if (!active.has(id)) await startTurn({ threadId: id, input: queued.input, clientUserMessageId: queued.clientUserMessageId, model: params.model, effort: params.effort }, notify)
-      else {
-        queues.set(id, [...(queues.get(id) ?? []), queued])
-        emit(id, 'thread/queue/changed', { threadId: id })
-      }
+      queues.set(id, [...(queues.get(id) ?? []), queued])
+      emit(id, 'thread/queue/changed', { threadId: id })
+      if (!active.has(id) && !starting.has(id)) await startQueuedTurn(id, notify, queued.id, { model: params.model, effort: params.effort })
       return { queuedSubmission: queued }
     },
     'thread/queue/delete': params => {
+      const launch = starting.get(params?.threadId)
+      if (launch?.submitted && launch.queued?.id === params?.queuedSubmissionId) throw invalidParams('Queued submission is being accepted')
       const list = queues.get(params?.threadId) ?? []
       const next = list.filter(entry => entry.id !== params?.queuedSubmissionId)
       queues.set(params?.threadId, next)
@@ -1027,20 +1177,13 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
       return { deleted: next.length !== list.length }
     },
     'thread/queue/reorder': params => {
-      const order = Array.isArray(params?.queuedSubmissionIds) ? params.queuedSubmissionIds : []
+      const order = Array.isArray(params?.queuedSubmissionIds) ? [...new Set(params.queuedSubmissionIds)] : []
       const list = queues.get(params?.threadId) ?? []
       queues.set(params?.threadId, [...order.map(id => list.find(entry => entry.id === id)).filter(Boolean), ...list.filter(entry => !order.includes(entry.id))])
       emit(params?.threadId, 'thread/queue/changed', { threadId: params?.threadId })
       return {}
     },
-    'thread/queue/start': async (params, { notify }) => {
-      const list = queues.get(params?.threadId) ?? []
-      const queued = list.find(entry => params?.queuedSubmissionId == null || entry.id === params.queuedSubmissionId)
-      if (!queued) throw invalidParams('Nothing queued')
-      queues.set(params.threadId, list.filter(entry => entry !== queued))
-      emit(params.threadId, 'thread/queue/changed', { threadId: params.threadId })
-      return startTurn({ threadId: params.threadId, input: queued.input, clientUserMessageId: queued.clientUserMessageId }, notify)
-    },
+    'thread/queue/start': (params, { notify }) => startQueuedTurn(params?.threadId, notify, params?.queuedSubmissionId),
   }
 
   const callOf = (session, callId) => {
@@ -1292,8 +1435,7 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
   }
   // The desktop's own voice call: the browser's offer becomes a call at ChatGPT, and this host joins that call the way it
   // joins one the phone made, so spoken requests run as turns of the DSH session and the answers are spoken back.
-  const desktopVoice = realtimeVoice === undefined ? undefined : Object.freeze({
-    async start({ sessionId, sdp, voice: voiceName, language }) {
+  const startDesktopVoice = async ({ sessionId, sdp, voice: voiceName, language, signal }) => {
       if (typeof sdp !== 'string' || !sdp.startsWith('v=0') || sdp.length > 64 * 1024) throw new RpcError(-32602, 'Invalid voice offer')
       const agent = await agentFor(sessionId)
       diagnosticLog.info('voice', 'the conversation can take a context note', String(typeof agent.inject === 'function'))
@@ -1301,14 +1443,17 @@ export function createDshRemoteControl({ controller, agents, permissions = () =>
         audio: { output: { voice: typeof voiceName === 'string' && /^[a-z]{2,16}$/u.test(voiceName) ? voiceName : 'cove' } },
         delegation: { type: 'client' }, instructions: desktopInstructions(language), model: 'gpt-live-1.1-codex',
       }
-      const { callId, answer } = await createVoiceCall({ fetch: voice.fetch, credentials: voice.credentials, userAgent, sdp, session, threadId: sessionId })
-      await realtimeVoice.start({ threadId: sessionId, transport: { type: 'existingCall', callId }, flushTranscriptTailOnSessionEnd: true, silentTailRecord: true, hangUpOnGoodbye: true, version: 'v3' }, async () => {})
+      const { callId, answer } = await createVoiceCall({ fetch: voice.fetch, credentials: voice.credentials, userAgent, sdp, session, threadId: sessionId, signal })
+      signal?.throwIfAborted()
+      await realtimeVoice.start({ threadId: sessionId, transport: { type: 'existingCall', callId }, flushTranscriptTailOnSessionEnd: true, silentTailRecord: true, hangUpOnGoodbye: true, version: 'v3' }, async () => {}, { signal })
       return { answer }
-    },
+  }
+  const desktopVoice = realtimeVoice === undefined ? undefined : Object.freeze({
+    start: startDesktopVoice,
     stop: sessionId => realtimeVoice.stop(sessionId),
     interrupt: sessionId => realtimeVoice.interrupt(sessionId),
     end: sessionId => realtimeVoice.requestClose(sessionId),
     status: sessionId => realtimeVoice.status(sessionId),
   })
-  return { methods, desktopVoice, onSessionEvent, onStream, onApproval, onQuestion, adopt, forget: notify => { for (const set of subscribers.values()) set.delete(notify) } }
+  return { methods, desktopVoice, onSessionEvent, onStream, onApproval, onQuestion, adopt, close() { realtimeVoice?.closeAll() }, forget: notify => { for (const set of subscribers.values()) set.delete(notify) } }
 }

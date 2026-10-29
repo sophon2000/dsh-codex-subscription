@@ -15,6 +15,11 @@ export const SEARCH_PROVIDER_AUTO = 'auto'
 export const SEARCH_PROVIDER_DSH = 'dsh'
 export const SEARCH_PROVIDER_CODEX = 'codex'
 export const DEFAULT_SEARCH_PROVIDER = SEARCH_PROVIDER_AUTO
+export const FETCH_PROVIDER_FIELD = 'fetchProvider'
+export const FETCH_PROVIDER_DSH = 'dsh'
+export const FETCH_PROVIDER_CODEX = 'codex'
+export const DEFAULT_FETCH_PROVIDER = FETCH_PROVIDER_DSH
+export const normalizeFetchProvider = value => value === FETCH_PROVIDER_CODEX ? FETCH_PROVIDER_CODEX : FETCH_PROVIDER_DSH
 export const SPEED_MODE_FIELD = 'speedMode'
 export const SPEED_MODE_STANDARD = 'standard'
 export const SPEED_MODE_FAST = 'fast'
@@ -36,6 +41,12 @@ export const VOICE_LANGUAGES = Object.freeze(['auto', 'zh', 'en', 'ja', 'ko', 'e
 export const normalizeVoiceCall = value => value === 'on' ? 'on' : 'off'
 export const normalizeVoiceVoice = value => VOICE_VOICES.includes(value) ? value : 'cove'
 export const normalizeVoiceLanguage = value => VOICE_LANGUAGES.includes(value) ? value : 'auto'
+export const DEFAULT_REASONING_EFFORT_FIELD = 'defaultReasoningEffort'
+export const DEFAULT_REASONING_EFFORTS = Object.freeze(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+export const DEFAULT_REASONING_EFFORT = 'auto'
+export const normalizeDefaultReasoningEffort = value => DEFAULT_REASONING_EFFORTS.includes(value) ? value : DEFAULT_REASONING_EFFORT
+export const normalizeDefaultReasoningEffortChoice = normalizeDefaultReasoningEffort
+
 export const REASONING_SUMMARY_FIELD = 'reasoningSummary'
 export const REASONING_SUMMARIES = Object.freeze(['auto', 'concise', 'detailed', 'none'])
 export const DEFAULT_REASONING_SUMMARY = 'auto'

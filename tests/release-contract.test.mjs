@@ -23,6 +23,21 @@ test('plugin card translations are exported and included in the published packag
 })
 const compatibility = JSON.parse(text('compatibility.json'))
 
+test('verify-only release runs the acceptance layout while disabling every publication job', () => {
+  const workflow = text('.github/workflows/publish.yml')
+  assert.match(workflow, /verify_only:\s*\n\s*description:[^\n]+\n\s*required: false\n\s*type: boolean\n\s*default: false/u)
+  assert.match(workflow, /VERIFY_ONLY: \$\{\{ inputs\.verify_only \}\}/u)
+  assert.match(workflow, /if \[\[ "\$VERIFY_ONLY" == 'true' \]\]; then[\s\S]*?echo "needed=true"[\s\S]*?exit 0/u)
+  for (const [name, next] of [['release', 'publish-npm'], ['publish-npm', 'sync-mirror'], ['sync-mirror', undefined]]) {
+    const start = workflow.indexOf(`\n  ${name}:`)
+    const end = next ? workflow.indexOf(`\n  ${next}:`, start) : workflow.length
+    assert.ok(start > 0 && end > start, name)
+    const job = workflow.slice(start, end)
+    const guard = job.slice(job.indexOf('\n    if:'), job.indexOf('\n    runs-on:'))
+    assert.match(guard, /inputs\.verify_only != true/u, `${name} must stay disabled during acceptance-only runs`)
+  }
+})
+
 test('normal installation does not pull the optional Codex executable runtime', () => {
   const runtime = '@deepseek-ai/dsh-subagent-codex'
   assert.equal(manifest.dependencies?.[runtime], undefined)
@@ -32,7 +47,7 @@ test('normal installation does not pull the optional Codex executable runtime', 
   for (const name of ['react', 'react-dom']) assert.equal(manifest.peerDependenciesMeta?.[name]?.optional, true, name)
   // The compatibility autopilot widens this range and the runtime list together.
   assert.equal(manifest.peerDependencies[runtime], [...SUPPORTED_RUNTIME_VERSIONS].sort(compareVersions).join(' || '))
-  assert.equal(manifest.devDependencies[runtime], '0.2.1-rc.3')
+  assert.equal(manifest.devDependencies[runtime], compatibility.latestTested)
   assert.equal(SUBAGENT_RUNTIME_VERSION, manifest.devDependencies[runtime])
   assert.deepEqual(new Set(SUPPORTED_RUNTIME_VERSIONS), new Set(manifest.peerDependencies[runtime].split(' || ')))
 })
@@ -66,7 +81,7 @@ test('official DSH acceptance materializes one exact runner instead of resolving
 
 test('release acceptance includes the exact declared DSH release alongside public channels', () => {
   const workflow = text('.github/workflows/publish.yml')
-  assert.match(workflow, /channel: \[latest, accepted, 0\.1\.7-rc\.2, alpha\]/u)
+  assert.match(workflow, /channel: \[latest, accepted, 0\.1\.7-rc\.2, alpha, next\]/u)
   assert.match(workflow, /Get-Content -LiteralPath compatibility\.json -Raw \| ConvertFrom-Json\)\.latestTested/u)
   const ci = text('.github/workflows/ci.yml')
   assert.match(ci, /channel: \[latest, accepted, 0\.1\.7-rc\.2, alpha, next\]/u)
@@ -108,7 +123,7 @@ test('release is a prebuilt, documented, removable DSH bundle', () => {
   assert.equal(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-remotes'), true)
   assert.equal(pkg.devDependencies['@deepseek-ai/cordis'], '4.0.4')
   assert.equal(pkg.devDependencies['@deepseek-ai/schemastery'], '3.18.4')
-  assert.equal(pkg.peerDependencies['@deepseek-ai/schemastery'], '3.18.1 || ^3.18.2')
+  assert.equal(pkg.peerDependencies['@deepseek-ai/schemastery'], '3.18.1 || ^3.18.2 || 3.18.6-alpha.1')
   assert.equal(pkg.peerDependencies['@earendil-works/pi-ai'], '0.85.1 || 0.87.1 || 1.1.0 || 1.2.0 || 1.3.0 || 1.4.0')
   assert.equal(pkg.packageManager, 'pnpm@11.26.0')
   assert.equal(existsSync(new URL('../lib/index.js', import.meta.url)), true)
@@ -365,7 +380,7 @@ test('official DSH install and web startup are hard gates before a release', () 
     assert.match(workflow, /Official DSH acceptance/u)
     assert.match(workflow, workflow === ci
       ? /channel: \[latest, (?:accepted, )?0\.1\.7-rc\.2, alpha, next\]/u
-      : /channel: \[latest, (?:accepted, )?0\.1\.7-rc\.2, alpha\]/u)
+      : /channel: \[latest, (?:accepted, )?0\.1\.7-rc\.2, alpha, next\]/u)
     assert.match(workflow, /-DshVersion \$version/u)
     assert.match(workflow, /accept-official-release\.ps1/u)
     assert.match(workflow, /accept-official-release\.ps1 -PackagePath \$package -DshRunner pnpm/u)
