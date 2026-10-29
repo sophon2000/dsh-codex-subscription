@@ -64,6 +64,8 @@ This plugin supports the latest DeepSeek Harness release recorded in its package
 
 ## Install
 
+For this fork's pinned Video host adaptation and portable archive workflow, see [Video host artifacts](docs/video-host-artifact.md). The upstream installation instructions remain below.
+
 ### Install from the Plugins page (recommended)
 
 1. Open **Plugins → Add plugin** in DSH.
