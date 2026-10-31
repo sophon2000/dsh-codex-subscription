@@ -81,3 +81,9 @@ and optional feature defaults remain owned by the upstream settings lifecycle.
 ## 3.2.1-vh.8 master host candidate / master 宿主候选
 
 The new `3.2.1-vh.8` artifact targets DSH `0.2.2-alpha.2.vh.1.local.20261031.1`. Its source remains based on the retained upstream 3.2.1 runtime. Codex subtask model inheritance now reads the live parent model selection when the Host exposes that API; older supported Hosts keep their existing request-header fallback. An unavailable live selection cannot fall back to a stale historical route. Host peers are derived from the actual frozen consumer installation, including its Cordis and pi-ai instances. The previous vh.7 archive remains unchanged. Build, host-package tests, repeat packing and consumer Profile checks must be recorded against this new candidate; no prior qualification is inherited.
+
+## 3.2.1-vh.9 consumer host snapshot / 消费端宿主快照
+
+The `3.2.1-vh.9` artifact keeps the same runtime adaptation and DSH target, and records the actual Video consumer's pi-ai `1.3.0` instance. The preliminary vh.8 rehearsal used pi-ai `1.4.0`; its archive is preserved and is not the final consumer input. Produce vh.9 twice from the actual consumer Host and compare the receipts before installing it. Consumer singleton and Profile lifecycle checks remain required.
+
+`3.2.1-vh.9` 保留相同运行时适配和 DSH 目标，按实际 Video 消费端记录 pi-ai `1.3.0` 实例。vh.8 预演使用了 pi-ai `1.4.0`；原归档保留，不作为最终消费输入。vh.9 必须从实际消费端宿主重复打包并比较收据，再安装校验；单实例与 Profile 生命周期仍需单独验证。
