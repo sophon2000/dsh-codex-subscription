@@ -168,8 +168,13 @@ export function createSubagentBackendSwitcher({ entries, prepare, persist }) {
       } catch (error) {
         selected = previous
         for (const { fiber, before, hasEffective } of changed.reverse()) {
-          if (!current(fiber) || hasEffective && fiber.config !== before) continue
-          await fiber.update(before, true)
+          if (!current(fiber)) continue
+          if (hasEffective) {
+            const raw = fiber.config
+            if (raw?.provider !== 'spawn' || !(fiber.effectiveConfig?.provider === SUBAGENT_PROVIDER
+              || previous === 'codex' && standard(fiber.entry, raw))) continue
+            await fiber.update(raw, true)
+          } else await fiber.update(before, true)
         }
         throw error
       }

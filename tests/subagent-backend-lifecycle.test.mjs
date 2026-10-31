@@ -156,3 +156,34 @@ test(`Cordis ${version}: disposal closes selection before awaiting an in-flight 
   await Promise.all([selection, disposal, rejected])
   assert.equal(active(fiber).provider, 'spawn')
 })
+
+for (const mode of ['codex', 'dsh']) {
+  test(`Cordis ${version}: failed ${mode} persistence rolls back the effective backend using the latest raw input`, async t => {
+    let begin, finish
+    const started = new Promise(resolve => { begin = resolve })
+    const persisted = new Promise(resolve => { finish = resolve })
+    const h = harness(t, { persist: async selected => {
+      if (selected !== mode) return
+      begin()
+      await persisted
+      throw new Error('persist failed')
+    } })
+    if (!('effectiveConfig' in h.root.fiber)) { t.skip('requires separate raw and effective configuration'); return }
+    const fiber = await h.mount()
+    if (mode === 'dsh') await h.switcher.select('codex')
+    const selection = h.switcher.select(mode)
+    const rejected = assert.rejects(selection, /persist failed/)
+    await started
+    const edited = { ...fiber.config, toolName: 'user-edited-while-persisting', maxDepth: 7 }
+    await fiber.update(edited, true)
+    finish()
+    await rejected
+    assert.equal(fiber.config, edited)
+    assert.equal(fiber.config.provider, 'spawn')
+    assert.equal(active(fiber).provider, mode === 'codex' ? 'spawn' : SUBAGENT_PROVIDER)
+    assert.equal(active(fiber).toolName, 'user-edited-while-persisting')
+    h.unconfigure()
+    await h.switcher.dispose()
+    assert.deepEqual(active(fiber), edited)
+  })
+}
