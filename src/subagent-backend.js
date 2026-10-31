@@ -115,6 +115,9 @@ export function createSubagentBackendSwitcher({ entries, prepare, persist }) {
   let selected = 'dsh'
   let tail = Promise.resolve()
   let disposed = false
+  let disposal
+  const hasEffectiveConfig = fiber => 'effectiveConfig' in fiber
+  const current = fiber => fiber.uid !== null && (!fiber.entry || fiber.entry.fiber === fiber)
   const standard = (entry, config) => entry?.options?.name === '@deepseek-ai/dsh-tool-subagent'
     && config?.provider === 'spawn' && !config.agentOptions && !config.persona && !config.toolFilter
   const convert = config => ({ ...config, provider: SUBAGENT_PROVIDER, modelSelectionSettings: true, backgroundMode: 'one-shot', maxDepth: 'provider-managed' })
@@ -150,16 +153,24 @@ export function createSubagentBackendSwitcher({ entries, prepare, persist }) {
       selected = mode
       try {
         for (const [fiber, original] of originals) {
-          if (fiber.entry && fiber.entry.fiber !== fiber) { originals.delete(fiber); continue }
-          const before = { ...fiber.config }
-          changed.push({ fiber, before })
+          if (!current(fiber)) { originals.delete(fiber); continue }
+          const hasEffective = hasEffectiveConfig(fiber)
+          // New Cordis retains raw input separately. Keep it user-owned and let
+          // the configuration hook apply this backend only to effective config.
+          if (hasEffective && (mode === 'codex' ? !standard(fiber.entry, fiber.config)
+            : fiber.config?.provider !== 'spawn' || fiber.effectiveConfig?.provider !== SUBAGENT_PROVIDER)) continue
+          const before = hasEffective ? fiber.config : { ...fiber.config }
+          changed.push({ fiber, before, hasEffective })
           if (mode === 'codex' && before.provider !== SUBAGENT_PROVIDER) originals.set(fiber, { ...before })
-          await fiber.update(mode === 'codex' ? convert(before) : restore(before, original), true)
+          await fiber.update(hasEffective ? before : mode === 'codex' ? convert(before) : restore(before, original), true)
         }
         await persist?.(mode)
       } catch (error) {
         selected = previous
-        for (const { fiber, before } of changed.reverse()) await fiber.update(before, true)
+        for (const { fiber, before, hasEffective } of changed.reverse()) {
+          if (!current(fiber) || hasEffective && fiber.config !== before) continue
+          await fiber.update(before, true)
+        }
         throw error
       }
     })
@@ -169,14 +180,22 @@ export function createSubagentBackendSwitcher({ entries, prepare, persist }) {
   return {
     select,
     configure,
-    async dispose() {
-      await tail.catch(() => {})
+    dispose() {
+      if (disposal) return disposal
       disposed = true
-      selected = 'dsh'
-      for (const [fiber, original] of originals) {
-        if (fiber.config?.provider === SUBAGENT_PROVIDER) await fiber.update(restore(fiber.config, original), true)
-      }
-      originals.clear()
+      disposal = (async () => {
+        await tail.catch(() => {})
+        selected = 'dsh'
+        for (const [fiber, original] of originals) {
+          if (!current(fiber)) continue
+          const raw = fiber.config
+          if (hasEffectiveConfig(fiber)) {
+            if (raw?.provider === 'spawn' && fiber.effectiveConfig?.provider === SUBAGENT_PROVIDER) await fiber.update(raw, true)
+          } else if (raw?.provider === SUBAGENT_PROVIDER) await fiber.update(restore(raw, original), true)
+        }
+        originals.clear()
+      })()
+      return disposal
     },
   }
 }

@@ -93,3 +93,13 @@ The `3.2.1-vh.9` artifact keeps the same runtime adaptation and DSH target, and 
 The `3.2.1-vh.10` artifact adapts the subagent backend's global configuration hook to Cordis `4.0.6-alpha.1`, which supplies its Fiber as the first argument. Earlier Hosts bind the Fiber as the listener receiver and remain supported. This preserves lazy subagent selection and restoration while allowing unrelated Profile plugins to resolve their configuration. The vh.9 archive remains unchanged; the new candidate requires its own build, repeat packing and real Profile lifecycle checks.
 
 `3.2.1-vh.10` 适配 Cordis `4.0.6-alpha.1` 将 Fiber 放在首个参数的新配置事件签名，同时保留旧宿主以监听器 `this` 传入 Fiber 的接口。延迟挂载的子代理仍沿用已选后端并可恢复，其它 Profile 插件可正常解析配置。vh.9 归档保留；新候选需重新构建、重复打包并验证真实 Profile 生命周期。
+
+## 3.2.1-vh.11 raw and effective configuration / 原始与生效配置
+
+Cordis `4.0.6-alpha.1` retains raw input separately from the configuration passed to an active plugin. The vh.11 switcher applies its backend through the configuration hook without writing Codex-owned fields into that raw input. Switching back or unloading re-resolves the latest raw input for a still-owned Fiber, preserving user edits. A user-selected provider, replaced entry or disposed Fiber is left alone. Disposal closes new selection requests before awaiting existing work. Earlier Hosts retain their existing configuration restoration path. Previous archives remain unchanged; actual Host lifecycle tests and a new artifact receipt are required.
+
+Cordis `4.0.6-alpha.1` 分别保存原始输入和插件当前生效配置。vh.11 只在配置钩子中应用后端，不把 Codex 字段写进原始输入；切回或卸载时，对仍归该 entry 所有的 Fiber 重新解析最新原始输入，保留用户修改。用户另选的 provider、已替换的 entry 和已卸载的 Fiber 不被回写。清理先停止接收新选择，再等待已有工作。旧宿主保留原有恢复路径；此前归档均保留，新版本需独立真实生命周期验证和归档收据。
+
+Run `tests/subagent-backend-lifecycle.test.mjs` with `DSH_CODEX_TEST_HOST_MANIFEST` set to the actual installed DSH CLI `package.json`. Without that explicit input it tests this source repository's locked development Cordis; that default does not qualify a newer consumer Host. The lifecycle scenarios include late activation, disposal, user raw edits, provider and entry replacement, disposed Fibers, and selection already in progress during cleanup.
+
+真实消费端验证须给 `DSH_CODEX_TEST_HOST_MANIFEST` 指定已安装 DSH CLI 的 `package.json` 后运行上述生命周期测试；未指定时仅检查本源码仓锁定的开发版 Cordis，不能据此认定新宿主通过。
