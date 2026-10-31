@@ -87,3 +87,9 @@ The new `3.2.1-vh.8` artifact targets DSH `0.2.2-alpha.2.vh.1.local.20261031.1`.
 The `3.2.1-vh.9` artifact keeps the same runtime adaptation and DSH target, and records the actual Video consumer's pi-ai `1.3.0` instance. The preliminary vh.8 rehearsal used pi-ai `1.4.0`; its archive is preserved and is not the final consumer input. Produce vh.9 twice from the actual consumer Host and compare the receipts before installing it. Consumer singleton and Profile lifecycle checks remain required.
 
 `3.2.1-vh.9` 保留相同运行时适配和 DSH 目标，按实际 Video 消费端记录 pi-ai `1.3.0` 实例。vh.8 预演使用了 pi-ai `1.4.0`；原归档保留，不作为最终消费输入。vh.9 必须从实际消费端宿主重复打包并比较收据，再安装校验；单实例与 Profile 生命周期仍需单独验证。
+
+## 3.2.1-vh.10 Cordis configuration lifecycle / 配置生命周期
+
+The `3.2.1-vh.10` artifact adapts the subagent backend's global configuration hook to Cordis `4.0.6-alpha.1`, which supplies its Fiber as the first argument. Earlier Hosts bind the Fiber as the listener receiver and remain supported. This preserves lazy subagent selection and restoration while allowing unrelated Profile plugins to resolve their configuration. The vh.9 archive remains unchanged; the new candidate requires its own build, repeat packing and real Profile lifecycle checks.
+
+`3.2.1-vh.10` 适配 Cordis `4.0.6-alpha.1` 将 Fiber 放在首个参数的新配置事件签名，同时保留旧宿主以监听器 `this` 传入 Fiber 的接口。延迟挂载的子代理仍沿用已选后端并可恢复，其它 Profile 插件可正常解析配置。vh.9 归档保留；新候选需重新构建、重复打包并验证真实 Profile 生命周期。

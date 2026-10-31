@@ -102,6 +102,13 @@ export function presetEntries(ctx) {
   } catch { return [] }
 }
 
+/** Cordis 4.0.6 passes the Fiber as an argument; earlier Hosts bind it as `this`. */
+export function installSubagentBackendConfiguration(ctx, switcher) {
+  return ctx.on('internal/config', function(fiberOrConfig, next) {
+    return switcher.configure(this ?? fiberOrConfig, next())
+  }, { global: true })
+}
+
 /** Change only standard independent spawn tools; leave fork/custom tools untouched. */
 export function createSubagentBackendSwitcher({ entries, prepare, persist }) {
   const originals = new Map()

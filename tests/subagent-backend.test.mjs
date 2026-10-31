@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createSubagentTokens } from '../src/subagent-auth.js'
-import { createSubagentBackendSwitcher, presetEntries, SUBAGENT_PROVIDER, subagentThreadPolicy } from '../src/subagent-backend.js'
+import { createSubagentBackendSwitcher, installSubagentBackendConfiguration, presetEntries, SUBAGENT_PROVIDER, subagentThreadPolicy } from '../src/subagent-backend.js'
 
 test('subscription subagent pins account and serializes concurrent token rotation', async () => {
   let current = { type: 'oauth', accountId: 'a', access: 'old' }
@@ -111,6 +111,42 @@ test('web preset tools mounted after selection receive the chosen backend', asyn
   assert.equal(mounted.fiber.config.provider, 'spawn')
   await switcher.dispose()
 })
+
+for (const signature of ['fiber-argument', 'legacy-receiver']) {
+  test(`global configuration uses the ${signature} Cordis Fiber and leaves unrelated plugins unchanged`, async () => {
+    const dormant = { options: { name: '@deepseek-ai/dsh-tool-subagent', disabled: true, config: { provider: 'spawn' } } }
+    const switcher = createSubagentBackendSwitcher({ entries: () => [dormant], prepare: async () => {} })
+    let listener, disposed = false
+    const unconfigure = installSubagentBackendConfiguration({ on(name, callback, options) {
+      assert.equal(name, 'internal/config')
+      assert.deepEqual(options, { global: true })
+      listener = callback
+      return () => { disposed = true }
+    } }, switcher)
+    await switcher.select('codex')
+    const resolve = fiber => {
+      let calls = 0
+      const next = () => { calls++; return fiber.config }
+      const resolved = signature === 'fiber-argument'
+        ? listener.call(null, fiber, next)
+        : listener.call(fiber, fiber.config, next)
+      assert.equal(calls, 1)
+      return resolved
+    }
+    const unrelated = { entry: { options: { name: 'unrelated-plugin' } }, config: { provider: 'spawn', value: 'retained' } }
+    assert.equal(resolve(unrelated), unrelated.config)
+    const mounted = entry('spawn', { toolName: 'lazy-subagent' })
+    mounted.fiber.entry = mounted
+    mounted.fiber.config = resolve(mounted.fiber)
+    assert.equal(mounted.fiber.config.provider, SUBAGENT_PROVIDER)
+    assert.equal(mounted.fiber.config.toolName, 'lazy-subagent')
+    await switcher.select('dsh')
+    assert.deepEqual(mounted.fiber.config, { provider: 'spawn', toolName: 'lazy-subagent' })
+    await switcher.dispose()
+    unconfigure()
+    assert.equal(disposed, true)
+  })
+}
 
 test('preset rows mounted by the DSH 0.2 registry are found, and a host without it yields none', () => {
   const rows = [{ options: { name: '@deepseek-ai/dsh-tool-subagent' } }, { options: { name: 'other' } }]
