@@ -8,7 +8,9 @@ const MODES = new Set(['read-only', 'workspace-write', 'danger-full-access'])
 
 export function subagentThreadPolicy(parent, policy, requested = {}) {
   if (!MODES.has(policy?.mode)) throw new Error('DSH subagent sandbox policy is unavailable')
-  const selected = parent.session.requestHeader?.()?.config ?? parent.options ?? {}
+  const selected = typeof parent.model?.current === 'function'
+    ? parent.model.current() ?? {}
+    : parent.session.requestHeader?.()?.config ?? parent.options ?? {}
   for (const key of Object.keys(requested)) {
     if (!['provider', 'model', 'reasoningEffort'].includes(key)) throw new Error('Unsupported Codex child option: ' + key)
   }

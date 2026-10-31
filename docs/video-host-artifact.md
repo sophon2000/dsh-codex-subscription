@@ -1,11 +1,12 @@
 # Video host artifacts / Video 宿主归档
 
-This fork prepares an exact host-specific package for Video without changing the
-upstream runtime build. The same Node commands run on macOS, Linux and Windows.
+This fork prepares an exact host-specific package for Video. Reviewed runtime
+adaptations are built and committed before packaging; the packer does not rewrite
+runtime code. The same Node commands run on macOS, Linux and Windows.
 The ordinary upstream package and compatibility declarations remain unchanged.
 
-本 fork 可为 Video 生成匹配固定 DSH 宿主的插件包。原始运行代码和官方兼容声明保持原样；
-适配结果是新的精确版本归档，不是修改已安装包或创建跨仓软链接。
+本 fork 可为 Video 生成匹配固定 DSH 宿主的插件包。必要的运行时适配先在源码中测试、构建并提交，
+打包器不改写运行代码或官方兼容声明。适配结果是新的精确版本归档，不修改已安装包或创建跨仓软链接。
 
 ## Prepare / 生成
 
@@ -76,3 +77,7 @@ exact host version and singleton checks, because the new upstream dynamically
 loads them. Linux voice capture still requires separate native acceptance;
 packaging its helper does not establish that acceptance. Existing OAuth data
 and optional feature defaults remain owned by the upstream settings lifecycle.
+
+## 3.2.1-vh.8 master host candidate / master 宿主候选
+
+The new `3.2.1-vh.8` artifact targets DSH `0.2.2-alpha.2.vh.1.local.20261031.1`. Its source remains based on the retained upstream 3.2.1 runtime. Codex subtask model inheritance now reads the live parent model selection when the Host exposes that API; older supported Hosts keep their existing request-header fallback. An unavailable live selection cannot fall back to a stale historical route. Host peers are derived from the actual frozen consumer installation, including its Cordis and pi-ai instances. The previous vh.7 archive remains unchanged. Build, host-package tests, repeat packing and consumer Profile checks must be recorded against this new candidate; no prior qualification is inherited.

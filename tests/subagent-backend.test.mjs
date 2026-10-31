@@ -21,6 +21,17 @@ test('subscription subagent pins account and serializes concurrent token rotatio
 })
 
 const childFeatures = Object.fromEntries(['apps', 'plugins', 'plugin_sharing', 'remote_plugin', 'tool_suggest', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'computer_use', 'in_app_browser'].map(name => [name, false]))
+test('subagent policy inherits the live parent selection before its historical request', () => {
+  const parent = { model: { current: () => ({ provider: 'openai-codex', model: 'gpt-6-astra', reasoningEffort: 'high' }) },
+    session: { requestHeader: () => ({ config: { provider: 'openai-codex', model: 'gpt-5.6-luna', reasoningEffort: 'low' } }) } }
+  const policy = { mode: 'workspace-write' }
+  assert.equal(subagentThreadPolicy(parent, policy).model, 'gpt-6-astra')
+  assert.equal(subagentThreadPolicy(parent, policy).config.model_reasoning_effort, 'high')
+  parent.model.current = () => undefined
+  assert.throws(() => subagentThreadPolicy(parent, policy), /Select an openai-codex model/)
+  assert.equal(subagentThreadPolicy(parent, policy, { model: 'gpt-5.6-luna' }).model, 'gpt-5.6-luna')
+})
+
 test('subagent policy takes parent model effort and sandbox, never user Codex defaults', () => {
   assert.deepEqual(subagentThreadPolicy({ session: { requestHeader: () => ({ config: {
     provider: 'openai-codex', model: 'gpt-5.6-luna', reasoningEffort: 'max',
