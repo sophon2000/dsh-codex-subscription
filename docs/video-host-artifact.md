@@ -170,3 +170,32 @@ authenticated Codex end-to-end acceptance.
 完整源码测试切到新宿主后，发现了设置写入成功但后续读取仍返回旧值的问题，因而本次必须生成新 vh.12。
 旧 `46482a0b080ed77246889bcedb18fde1b17d1c12` / vh.11 源码与归档保留，不能覆写或继承其资格。
 vh.12 仍需新的精确归档、实际消费端单实例及 Profile 生命周期检查；Windows/Linux 原生资格需分别实测。
+
+## 3.2.1-vh.13 Profile ownership and Desktop projection / Profile 依赖与桌面投影
+
+Independent review found two valid installation layouts that vh.12 rejected, so
+vh.12 remains an unaccepted rehearsal and its bytes are retained. vh.13 keeps the
+same frozen DSH input and binds all ten DeepSeek component dependency identities
+and exact versions from the reviewed component manifest. Cordis, LLM and
+Schemastery must always resolve to the Host's physical core instances, including
+from the plugin and the component's actual entry. Other SDK dependencies visible
+to the Host must also share its physical instance. Only when the Host genuinely
+has no such non-core package may the component's Profile own that exact reviewed
+name/version; this permits the Manager to supply `dsh-subprocess` without
+inventing a core Host dependency. Unknown versions and duplicate Host-visible
+dependencies remain rejected.
+
+The frozen Desktop SDK artifact with SHA-256
+`f20d4900a6a81622069d8885eb4643896dbb376bb84eddd76db9164488e20ba8`
+projects this component from 19 files to 16 by omitting exactly
+`lib/types/index.d.ts`, `lib/types/run.d.ts` and `lib/types/wire.d.ts`.
+Its package manifest, executable code, configuration and all remaining bytes are
+unchanged. The vh.13 build input and package binding contain two complete exact
+hash maps: the original SRI-bound 19-file artifact and this reviewed 16-file
+projection. The runtime accepts either whole layout. Partial declaration removal,
+mixed layouts, modified JavaScript or metadata, missing runtime files, unknown
+files and nested dependency shadows still fail closed; there is no general file
+exclusion rule.
+
+vh.13 修复的是合法安装布局的接纳边界，不改变 DSH/SDK 字节、公共稳定兼容范围、可选组件默认值或 Manager 审批流程。
+新版本仍需自身归档收据、最终消费端固定安装及真实 Profile 生命周期验收；vh.12 的测试记录不能替代这些步骤。

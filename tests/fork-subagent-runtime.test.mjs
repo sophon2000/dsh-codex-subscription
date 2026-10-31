@@ -87,7 +87,7 @@ test('a profile-local equal-version core peer cannot replace the Host singleton'
     { pluginManifest: plugin, payload: false }), /Duplicate plugin Host runtime/)
 })
 
-test('an optional Profile component may share core peers with a separate Host installation', t => {
+test('an optional Profile component can supply exact non-core dependencies absent from a separate Host', t => {
   const root = mkdtempSync(join(tmpdir(), 'codex-fork-profile-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const hostModules = join(root, 'host/node_modules')
@@ -98,14 +98,77 @@ test('an optional Profile component may share core peers with a separate Host in
   const core = { ...pkg.dependencies, ...pkg.peerDependencies }
   for (const [dependency, version] of Object.entries(core)) {
     if (!dependency.startsWith('@deepseek-ai/')) continue
-    const target = join(hostModules, dependency)
+    // A normal Manager install owns this optional service in the Profile. The
+    // Host's LLM has no dependency on it, unlike the three shared core peers.
+    const target = dependency === '@deepseek-ai/dsh-subprocess'
+      ? join(profileModules, dependency) : join(hostModules, dependency)
     mkdirSync(target, { recursive: true })
     writeFileSync(join(target, 'package.json'), JSON.stringify({ name: dependency, version: version.replace(/^[~^]/u, '') }))
-    mkdirSync(dirname(join(profileModules, dependency)), { recursive: true })
-    symlinkSync(target, join(profileModules, dependency), process.platform === 'win32' ? 'junction' : 'dir')
+    if (dependency !== '@deepseek-ai/dsh-subprocess') {
+      mkdirSync(dirname(join(profileModules, dependency)), { recursive: true })
+      symlinkSync(target, join(profileModules, dependency), process.platform === 'win32' ? 'junction' : 'dir')
+    }
   }
   const plugin = join(profile, 'package.json')
   writeFileSync(plugin, '{}')
-  assert.equal(verifyRuntimeOwner(config, join(hostModules, '@deepseek-ai/dsh-llm/package.json'),
-    join(provider, 'package.json'), { pluginManifest: plugin }), true)
+  const verify = () => verifyRuntimeOwner(config, join(hostModules, '@deepseek-ai/dsh-llm/package.json'),
+    join(provider, 'package.json'), { pluginManifest: plugin })
+  assert.equal(verify(), true)
+  const subprocess = join(profileModules, '@deepseek-ai/dsh-subprocess/package.json')
+  writeFileSync(subprocess, JSON.stringify({ name: '@deepseek-ai/dsh-subprocess', version: '9.9.9' }))
+  assert.throws(verify, /Mixed component Host runtime/)
+  writeFileSync(subprocess, JSON.stringify({ name: '@deepseek-ai/dsh-subprocess', version: config.hostVersion }))
+  assert.equal(verify(), true)
+  const protocol = join(profileModules, '@deepseek-ai/dsh-sdk-protocol')
+  rmSync(protocol)
+  mkdirSync(protocol)
+  writeFileSync(join(protocol, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-sdk-protocol', version: config.hostVersion }))
+  assert.throws(verify, /Duplicate component Host runtime/, 'Host-visible non-core packages still require the same physical instance')
+  rmSync(protocol, { recursive: true })
+  symlinkSync(join(hostModules, '@deepseek-ai/dsh-sdk-protocol'), protocol, process.platform === 'win32' ? 'junction' : 'dir')
+  assert.equal(verify(), true)
+  // Even an equal-version Profile core copy must not replace the Host singleton.
+  const cordis = join(profileModules, '@deepseek-ai/cordis')
+  rmSync(cordis)
+  mkdirSync(cordis)
+  writeFileSync(join(cordis, 'package.json'), JSON.stringify({ name: '@deepseek-ai/cordis', version: '4.0.6-alpha.1' }))
+  assert.throws(verify, /Duplicate plugin Host runtime/)
+})
+
+test('only the complete original and approved Desktop file layouts are accepted', t => {
+  const root = mkdtempSync(join(tmpdir(), 'codex-fork-projection-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const original = dirname(manifest)
+  const omitted = ['lib/types/index.d.ts', 'lib/types/run.d.ts', 'lib/types/wire.d.ts']
+  assert.equal(Object.keys(config.subagentRuntime.files).length, 19)
+  assert.equal(Object.keys(config.subagentRuntime.desktopFiles).length, 16)
+  assert.deepEqual(config.subagentRuntime.desktopFiles, Object.fromEntries(
+    Object.entries(config.subagentRuntime.files).filter(([name]) => !omitted.includes(name))))
+  const copy = name => {
+    const path = join(root, name)
+    cpSync(original, path, { recursive: true })
+    return path
+  }
+  const verify = path => verifyRuntimeFiles(config, join(path, 'package.json'))
+  const raw = copy('original')
+  verify(raw)
+  const desktop = copy('desktop')
+  for (const name of omitted) rmSync(join(desktop, name))
+  verify(desktop)
+  // Reintroducing only one or two declarations is neither approved layout.
+  for (const name of omitted.slice(0, 2)) {
+    cpSync(join(original, name), join(desktop, name))
+    assert.throws(() => verify(desktop), /reviewed artifact/)
+  }
+  for (const [name, change] of [
+    ['changed-js', path => writeFileSync(join(path, 'lib/index.js'), '// changed\n')],
+    ['missing-js', path => rmSync(join(path, 'lib/index.js'))],
+    ['changed-manifest', path => writeFileSync(join(path, 'package.json'), JSON.stringify({ ...JSON.parse(readFileSync(manifest)), description: 'changed' }))],
+    ['unknown-file', path => writeFileSync(join(path, 'unreviewed.js'), '// extra\n')],
+    ['nested-dependencies', path => mkdirSync(join(path, 'lib/node_modules'), { recursive: true })],
+  ]) {
+    const path = copy(name)
+    change(path)
+    assert.throws(() => verify(path), /reviewed artifact|Nested dependency shadow/, name)
+  }
 })

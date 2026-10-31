@@ -3,9 +3,12 @@ import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, sep } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 const owner = 'https://github.com/sophon2000/dsh-codex-subscription'
 const component = '@deepseek-ai/dsh-subagent-codex'
+const corePeers = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-llm', '@deepseek-ai/schemastery']
+const desktopOmissions = ['lib/types/index.d.ts', 'lib/types/run.d.ts', 'lib/types/wire.d.ts']
 const json = path => JSON.parse(readFileSync(path, 'utf8'))
 
 /** Resolve metadata without relying on a package.json export. */
@@ -34,9 +37,20 @@ export function validateRuntimeBinding(binding, expected) {
   assert.match(runtime.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/u)
   assert.ok(Object.keys(runtime.files).length > 0)
   assert.ok(runtime.files['package.json'])
-  for (const [name, hash] of Object.entries(runtime.files)) {
-    assert.ok(name && !name.startsWith('/') && !name.includes('\\') && !name.split('/').some(part => !part || part === '.' || part === '..' || part === 'node_modules'), 'Unsafe component file')
-    assert.match(hash, /^[a-f0-9]{64}$/u)
+  for (const files of [runtime.files, runtime.desktopFiles]) {
+    for (const [name, hash] of Object.entries(files)) {
+      assert.ok(name && !name.startsWith('/') && !name.includes('\\') && !name.split('/').some(part => !part || part === '.' || part === '..' || part === 'node_modules'), 'Unsafe component file')
+      assert.match(hash, /^[a-f0-9]{64}$/u)
+    }
+  }
+  assert.ok(desktopOmissions.every(name => runtime.files[name]))
+  assert.deepEqual(runtime.desktopFiles, Object.fromEntries(Object.entries(runtime.files).filter(([name]) => !desktopOmissions.includes(name))),
+    'Desktop projection may omit only the three reviewed declarations')
+  assert.match(runtime.desktopSdkSha256, /^[a-f0-9]{64}$/u)
+  assert.ok(corePeers.every(name => runtime.dependencies[name]))
+  for (const [name, version] of Object.entries(runtime.dependencies)) {
+    assert.match(name, /^@deepseek-ai\/[a-z0-9-]+$/u)
+    assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, 'Bound dependency must have an exact version')
   }
   if (expected) {
     assert.equal(binding.hostVersion, expected.hostVersion)
@@ -70,7 +84,8 @@ export function verifyRuntimeFiles(binding, manifest) {
     }
   }
   visit(root)
-  assert.deepEqual(actual, runtime.files, 'Installed component differs from the reviewed artifact SRI/file closure')
+  assert.ok(isDeepStrictEqual(actual, runtime.files) || isDeepStrictEqual(actual, runtime.desktopFiles),
+    'Installed component differs from the reviewed artifact SRI/file closure or exact Desktop projection')
   return pkg
 }
 
@@ -94,18 +109,25 @@ export function verifyRuntimeOwner(binding, hostLlmManifest, componentManifest, 
   const entry = realpathSync(providerEntry ?? join(dirname(provider), pkg.main))
   const entryFile = relative(dirname(provider), entry).split(sep).join('/')
   assert.ok(runtime.files[entryFile], 'Provider entry must belong to the reviewed component payload')
-  const dependencies = { ...pkg.dependencies, ...pkg.peerDependencies }
+  const declaredDependencies = Object.fromEntries(Object.entries({ ...pkg.dependencies, ...pkg.peerDependencies })
+    .filter(([name]) => name.startsWith('@deepseek-ai/')).map(([name, version]) => [name, version.replace(/^[~^]/u, '')]))
+  assert.deepEqual(declaredDependencies, runtime.dependencies, 'Component SDK dependency declarations differ from the reviewed binding')
   if (pluginManifest) {
-    for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-llm', '@deepseek-ai/schemastery']) {
+    for (const name of corePeers) {
       assert.equal(installedManifest(name, pluginManifest), installedManifest(name, host), `Duplicate plugin Host runtime: ${name}`)
     }
   }
-  for (const [name, version] of Object.entries(dependencies)) {
-    if (!name.startsWith('@deepseek-ai/')) continue
-    const expected = version.replace(/^[~^]/u, '')
-    const hostPath = installedManifest(name, host)
-    assert.equal(installedManifest(name, entry), hostPath, `Duplicate component Host runtime: ${name}`)
-    assert.equal(json(hostPath).version, expected, `Mixed component Host runtime: ${name}`)
+  for (const [name, expected] of Object.entries(runtime.dependencies)) {
+    const componentPath = installedManifest(name, entry)
+    assert.equal(json(componentPath).version, expected, `Mixed component Host runtime: ${name}`)
+    let hostPath
+    try { hostPath = installedManifest(name, host) }
+    catch (error) {
+      // Optional components can own missing non-core SDK dependencies in their
+      // Profile. The exact identity still comes from the reviewed binding.
+      if (error.code !== 'MODULE_NOT_FOUND' || corePeers.includes(name)) throw error
+    }
+    if (hostPath) assert.equal(componentPath, hostPath, `Duplicate component Host runtime: ${name}`)
   }
   assert.equal(runtime.version, pkg.version)
   return true

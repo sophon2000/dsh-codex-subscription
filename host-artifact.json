@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.2.1-vh.12",
+  "version": "3.2.1-vh.13",
   "hostVersion": "0.2.2-alpha.2.vh.1.local.20261031.1",
   "pnpmVersion": "11.9.0",
   "repository": "https://github.com/sophon2000/dsh-codex-subscription",
@@ -27,6 +27,37 @@
       "locale/ru.json": "d487e1b8de3fae823b2aa6e7ef6b339f6257f1c7b78b1923fe7ea209905bf0bf",
       "locale/zh.json": "b7dbe995afe99a2b1adbd520b143d37345ad7deed7191f12d046585a30ff409c",
       "package.json": "6eea119ba58c06eb8acfb0674e916162b349ce15068318224f9f1a737976a508"
+    },
+    "desktopFiles": {
+      "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+      "README.i18n.yaml": "db5be2be2f9403de5130e9cb78079a06bbab2cc8934045bc9671a9e03c1b3687",
+      "README.md": "4eeacfc32baafbc28b6487e95249dab954228a88932c496c156f316192ad7fd6",
+      "README.zh.md": "76036b63ef7cf3ab12849f5d6cdcea9e1c4d04f8f6a49f80b3c0b0c698f7ed8a",
+      "cordis.patch.yml": "200ff967933b381aee012fe3804b8fcff2431e8585d183e17ee4c074b1c6fc5a",
+      "icon.svg": "ec7d58e150c0be45ce2d463cfd75162d09ec56a8c2249857211d14bd78b64ff8",
+      "lib/index.js": "68dfa5d64b3393bb722e4da1b39e68ddb2c5d22646f3d5b864d341aacf6afeb7",
+      "locale/de.json": "621b957e1168ebc421e41b686274946de1db26cf647e1d3ae4ae51c9d5dd9992",
+      "locale/en.json": "21f7830094c72d8aa2866a3ecc69af227642ed9581c287c4d86594f8ab08bfcc",
+      "locale/es.json": "0b590eb682de5d26109628bc91f872fc7277a22b37a75af6f5f90497ea4e0aa7",
+      "locale/fr.json": "ada33d1b80b87d6120187210ec1f373e3450f6787e6a3fc85b4a294900b2159a",
+      "locale/ja.json": "ed6847eb70219c443684077b87cf6f58ab90e3032c6f3a09ad9c651dadbe8a29",
+      "locale/pt.json": "5a4e064f7be47c284b919f7994425c8cf636b7c1b4bf019360c0c8b2a2414572",
+      "locale/ru.json": "d487e1b8de3fae823b2aa6e7ef6b339f6257f1c7b78b1923fe7ea209905bf0bf",
+      "locale/zh.json": "b7dbe995afe99a2b1adbd520b143d37345ad7deed7191f12d046585a30ff409c",
+      "package.json": "6eea119ba58c06eb8acfb0674e916162b349ce15068318224f9f1a737976a508"
+    },
+    "desktopSdkSha256": "f20d4900a6a81622069d8885eb4643896dbb376bb84eddd76db9164488e20ba8",
+    "dependencies": {
+      "@deepseek-ai/cordis": "4.0.6-alpha.1",
+      "@deepseek-ai/dsh-brand": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-llm": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-sdk-protocol": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-session": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-subagent": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-subprocess": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-timeout": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-tool-subagent": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/schemastery": "3.18.6-alpha.1"
     }
   }
 }
