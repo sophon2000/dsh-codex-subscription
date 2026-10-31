@@ -5,8 +5,9 @@ import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 import { createSubagentBackendSwitcher, installSubagentBackendConfiguration, SUBAGENT_PROVIDER } from '../src/subagent-backend.js'
 
-// The default is the source repository's locked Cordis. Candidate qualification
-// supplies the actual installed DSH CLI manifest to exercise its own lifecycle.
+// The default is the reviewed source development cohort in dev-host.json.
+// Candidate qualification still supplies the actual installed DSH CLI manifest;
+// a legacy installation can use the same explicit input to exercise that branch.
 const require = createRequire(realpathSync(process.env.DSH_CODEX_TEST_HOST_MANIFEST
   ?? new URL('../package.json', import.meta.url)))
 const { Context } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href)

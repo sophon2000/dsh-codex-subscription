@@ -140,7 +140,7 @@ export function configuredFetchProviderId(web, entries = [], ambient = process.e
   const environment = 'fetchProviderEnv' in web ? web.fetchProviderEnv : ambient
   if (typeof web.config?.fetchProvider?.get === 'function') return web.config.fetchProvider.get() ?? environment
   const entry = [...entries].find(item => item.options?.id === 'web')
-  const value = entry?.fiber?.config?.fetchProvider
+  const value = (entry?.fiber?.effectiveConfig ?? entry?.fiber?.config)?.fetchProvider
   if (typeof value?.get === 'function') return value.get() ?? environment
   return value ?? entry?.options?.config?.fetchProvider ?? environment
 }

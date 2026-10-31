@@ -60,6 +60,16 @@ test('test dispatch changes exercise all CI gates', () => {
   }
 })
 
+test('a development Host identity change exercises behavior and delivery without changing runtime', () => {
+  const result = plan(['dev-host.json'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout).plan, {
+    behavior: true, delivery: true, manager: false, official: true, runtime: false,
+  })
+  assert.ok(testFiles('delivery').includes('tests/development-host.test.mjs'))
+  assert.ok(!testFiles('behavior').includes('tests/development-host.test.mjs'), 'official compatibility probes select their own Host')
+})
+
 test('unreleased runtime changes keep all acceptance gates at the current stable version', () => {
   const result = plan(['src/index.js'])
   assert.equal(result.status, 0, result.stderr)

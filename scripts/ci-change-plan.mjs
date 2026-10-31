@@ -63,20 +63,20 @@ const delivery = plannerChanged || runtime || changedTest('delivery') || matches
   /^\.github\//u,
   /^(?:README(?:\.zh-CN|\.en)?|CONTRIBUTING|DIRECTORY|AGENTS|SECURITY|THIRD_PARTY_NOTICES|LICENSE)\.md$/u,
   /^screenshots\.json$/u,
-  /^compatibility\.json$/u,
+  /^(?:compatibility|dev-host)\.json$/u,
   /^package\.json$/u,
   /^pnpm-lock\.yaml$/u,
   /^pnpm-workspace\.yaml$/u,
   /^scripts\/prepare-compat-release\.mjs$/u,
 ])
 const behavior = plannerChanged || runtime || changedTest('behavior') || matches([
-  /^compatibility\.json$/u,
+  /^(?:compatibility|dev-host)\.json$/u,
   /^package\.json$/u,
   /^pnpm-lock\.yaml$/u,
   /^pnpm-workspace\.yaml$/u,
 ])
 const official = plannerChanged || runtime || matches([
-  /^compatibility\.json$/u,
+  /^(?:compatibility|dev-host)\.json$/u,
   /^package\.json$/u,
   /^pnpm-lock\.yaml$/u,
   /^pnpm-workspace\.yaml$/u,

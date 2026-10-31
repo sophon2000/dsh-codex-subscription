@@ -5,12 +5,12 @@ export function createSettingsAdapter(ctx, config) {
   const entry = ctx.fiber.entry
   const id = entry?.options?.id ?? entry?.id
   if (!id) throw new Error('DSH settings entry is unavailable')
-  // A volatile write swaps the fiber's config and reloads the plugin; reads from
-  // the apply-time `config` snapshot go stale in between. Prefer the fiber's
-  // live config when it is readable and shaped like a config object.
+  // New Cordis retains raw input in config and live references in effectiveConfig.
+  // Older Hosts expose the resolved values through config. Both can outlive the
+  // apply-time snapshot while settings updates commit their volatile references.
   const liveConfig = () => {
     try {
-      const current = ctx.fiber?.config ?? ctx.config
+      const current = ctx.fiber?.effectiveConfig ?? ctx.fiber?.config ?? ctx.config
       return current !== null && typeof current === 'object' ? current : config
     } catch {
       return config

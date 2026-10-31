@@ -13,7 +13,7 @@ function nativeDelegations(ctx, agent) {
   const tools = scopedTools(agent) ?? ctx.get?.('tools')
   const subagents = ctx.get?.('subagents')
   return presetEntries(ctx).flatMap(entry => {
-    const config = entry.fiber?.config ?? entry.options?.config
+    const config = entry.fiber?.effectiveConfig ?? entry.fiber?.config ?? entry.options?.config
     if (entry.options?.name !== '@deepseek-ai/dsh-tool-subagent' ||
       !['spawn', SUBAGENT_PROVIDER].includes(config?.provider) || !subagents?.getProvider?.(config.provider)) return []
     const name = config.toolName ?? 'subagent'

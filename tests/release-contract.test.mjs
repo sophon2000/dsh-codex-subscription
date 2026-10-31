@@ -22,6 +22,7 @@ test('plugin card translations are exported and included in the published packag
   assert.match(JSON.parse(text('locale/zh.json')).meta.description, /订阅/)
 })
 const compatibility = JSON.parse(text('compatibility.json'))
+const developmentHost = JSON.parse(text('dev-host.json'))
 
 test('verify-only release runs the acceptance layout while disabling every publication job', () => {
   const workflow = text('.github/workflows/publish.yml')
@@ -47,8 +48,8 @@ test('normal installation does not pull the optional Codex executable runtime', 
   for (const name of ['react', 'react-dom']) assert.equal(manifest.peerDependenciesMeta?.[name]?.optional, true, name)
   // The compatibility autopilot widens this range and the runtime list together.
   assert.equal(manifest.peerDependencies[runtime], [...SUPPORTED_RUNTIME_VERSIONS].sort(compareVersions).join(' || '))
-  assert.equal(manifest.devDependencies[runtime], compatibility.latestTested)
-  assert.equal(SUBAGENT_RUNTIME_VERSION, manifest.devDependencies[runtime])
+  assert.equal(manifest.devDependencies[runtime], developmentHost.dshVersion)
+  assert.equal(SUBAGENT_RUNTIME_VERSION, compatibility.latestTested)
   assert.deepEqual(new Set(SUPPORTED_RUNTIME_VERSIONS), new Set(manifest.peerDependencies[runtime].split(' || ')))
 })
 
@@ -112,17 +113,17 @@ test('release is a prebuilt, documented, removable DSH bundle', () => {
   for (const [name, version] of Object.entries(pkg.peerDependencies)) {
     if (name.startsWith('@deepseek-ai/dsh-') && !pkg.peerDependenciesMeta?.[name]?.optional) assert.deepEqual(new Set(version.split(' || ')), supportedDshReleases, name)
   }
-  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-llm-pi-ai'], compatibility.latestTested)
+  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-llm-pi-ai'], developmentHost.dshVersion)
   assert.equal(pkg.dependencies['@deepseek-ai/dsh-home-paths'], compatibility.latestTested)
-  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-api-remotes'], compatibility.latestTested)
-  assert.match(pkg.devDependencies['@deepseek-ai/dsh-invariants'], /^0\.2\.\d+-rc\.\d+$/u, 'dsh-invariants is not republished with every DSH release')
+  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-api-remotes'], developmentHost.dshVersion)
+  assert.equal(pkg.devDependencies['@deepseek-ai/dsh-invariants'], undefined, 'the retired package is unused and absent from the master cohort')
   assert.equal(pkg.devDependencies['@deepseek-ai/dsh-client-ui-attachment'], undefined)
   assert.equal(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'), false)
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-client-runtime'], undefined)
   assert.equal(pkg.devDependencies['@deepseek-ai/dsh-client-runtime'], undefined)
   assert.equal(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-remotes'), true)
-  assert.equal(pkg.devDependencies['@deepseek-ai/cordis'], '4.0.4')
-  assert.equal(pkg.devDependencies['@deepseek-ai/schemastery'], '3.18.4')
+  assert.equal(pkg.devDependencies['@deepseek-ai/cordis'], developmentHost.vendors['@deepseek-ai/cordis'])
+  assert.equal(pkg.devDependencies['@deepseek-ai/schemastery'], developmentHost.vendors['@deepseek-ai/schemastery'])
   assert.equal(pkg.peerDependencies['@deepseek-ai/schemastery'], '3.18.1 || ^3.18.2 || 3.18.6-alpha.1')
   assert.equal(pkg.peerDependencies['@earendil-works/pi-ai'], '0.85.1 || 0.87.1 || 1.1.0 || 1.2.0 || 1.3.0 || 1.4.0')
   assert.equal(pkg.packageManager, 'pnpm@11.26.0')
@@ -305,7 +306,7 @@ test('release-age exceptions are pinned to the audited DeepSeek preview graph', 
   assert.ok(deepseekPackages.length > 0)
   assert.match(workspace, /minimumReleaseAge:\s*1440/u)
   assert.match(workspace, /# dsh-compat-release-age-start[\s\S]*# dsh-compat-release-age-end/u)
-  assert.equal(workspace.includes(`'@deepseek-ai/dsh@${compatibility.latestTested}'`), true)
+  assert.equal(workspace.includes(`'@deepseek-ai/dsh@${developmentHost.dshVersion}'`), true)
   assert.doesNotMatch(workspace, /@deepseek-ai\/\*/u)
   for (const selector of deepseekPackages) {
     assert.equal(workspace.includes(`- '${selector}'`), true, `missing exact release-age exception for ${selector}`)

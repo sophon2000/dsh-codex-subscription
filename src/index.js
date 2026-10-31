@@ -102,9 +102,10 @@ export function createSearchProviderSwitcher(loader) {
       ? configured
       : DSH_SEARCH_PROVIDER_FALLBACK
   }
-  // Fiber.config holds resolved volatile references (readable with get()), never raw strings.
+  // New Cordis separates effective references from retained raw config.
   const current = () => {
-    const value = webEntry()?.fiber?.config?.searchProvider
+    const fiber = webEntry()?.fiber
+    const value = (fiber?.effectiveConfig ?? fiber?.config)?.searchProvider
     return typeof value === 'string' ? value : value?.get?.()
   }
   const writeProvider = async provider => {

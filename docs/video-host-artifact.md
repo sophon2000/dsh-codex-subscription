@@ -100,6 +100,73 @@ Cordis `4.0.6-alpha.1` retains raw input separately from the configuration passe
 
 Cordis `4.0.6-alpha.1` 分别保存原始输入和插件当前生效配置。vh.11 只在配置钩子中应用后端，不把 Codex 字段写进原始输入；切回或卸载时，对仍归该 entry 所有的 Fiber 重新解析最新原始输入，保留用户修改。用户另选的 provider、已替换的 entry 和已卸载的 Fiber 不被回写。清理先停止接收新选择，再等待已有工作。旧宿主保留原有恢复路径；此前归档均保留，新版本需独立真实生命周期验证和归档收据。
 
-Run `tests/subagent-backend-lifecycle.test.mjs` with `DSH_CODEX_TEST_HOST_MANIFEST` set to the actual installed DSH CLI `package.json`. Without that explicit input it tests this source repository's locked development Cordis; that default does not qualify a newer consumer Host. The lifecycle scenarios include late activation, disposal, user raw edits, provider and entry replacement, disposed Fibers, and selection already in progress during cleanup.
+Run `tests/subagent-backend-lifecycle.test.mjs` with `DSH_CODEX_TEST_HOST_MANIFEST` set to the actual installed DSH CLI `package.json`. Without that explicit input it tests the source development cohort recorded below; the source pass does not qualify a consumer installation. The lifecycle scenarios include late activation, disposal, user raw edits, provider and entry replacement, disposed Fibers, and selection already in progress during cleanup.
 
 真实消费端验证须给 `DSH_CODEX_TEST_HOST_MANIFEST` 指定已安装 DSH CLI 的 `package.json` 后运行上述生命周期测试；未指定时仅检查本源码仓锁定的开发版 Cordis，不能据此认定新宿主通过。
+
+## Source development cohort / 源码开发宿主
+
+`dev-host.json` records the default development input: DSH
+`0.2.2-alpha.2.vh.1.local.20261031.1` from source
+`3400c4a11043fbd0ab486561edc23d6309f41463`, manifest SHA-256
+`74194986c3bb60fa62e7819772512c9cfd62203da9f224b46fb9e0b5e64b7c58`,
+the nine exact vendor versions including Cordis `4.0.6-alpha.1` and Schemastery
+`3.18.6-alpha.1`, and pi-ai/pi-telemetry `1.3.0`. These unpublished SDK inputs
+require the matching reviewed candidate registry when installing; they cannot be
+fetched from public npm. Keep this project's `pnpm@11.26.0` and install the lock
+normally, without source links or disabling supply-chain checks:
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts --registry "<reviewed-candidate-registry>"
+pnpm test
+pnpm run build
+```
+
+The default full source suite now runs this installed cohort. The development
+delivery test checks exact direct and transitive SDK identities and requires their
+physical paths inside this checkout's pnpm installation. The old unused
+`dsh-invariants@0.2.0-rc.2` dev dependency is removed because the master manifest
+does not contain it. Public peer ranges, stable compatibility metadata and the
+older Cordis lifecycle path remain unchanged. Official compatibility probes
+continue to select their own installed Host; the development identity test belongs
+to delivery checks rather than that runtime probe.
+
+本源码默认完整测试使用上述精确开发 cohort，不再默认绑定 Cordis `4.0.4`。
+`DSH_CODEX_TEST_HOST_MANIFEST` 只为生命周期测试显式选择另一份已安装宿主；其它源码测试仍使用本仓锁定依赖。
+旧宿主兼容分支保留，但新开发环境的通过不代替旧宿主或真实消费端的独立验收。
+
+The public `compatibility.latestTested` value and `SUBAGENT_RUNTIME_VERSION`
+continue to describe the reviewed public stable lane, not this private development
+target. The target is selected separately by the exact development and artifact
+bindings; an arbitrary newer version or a similar fork suffix is not accepted.
+
+## 3.2.1-vh.12 effective settings and component binding / 生效配置与组件绑定
+
+Running the complete source suite against the new cohort exposed stale settings
+reads: Cordis now keeps raw input in `fiber.config` and live volatile references
+in `fiber.effectiveConfig`. vh.12 prefers the effective configuration for settings,
+search/fetch selection and native Ultra delegation, with the old Host fallback
+retained. The settings regression uses a real Cordis Fiber and verifies the later
+status read, reference identity and update notification, rather than trusting the
+write receipt.
+
+The optional subtask runtime also needs an explicit fork binding; the public
+official-version list alone cannot recognize this private Host. `host-artifact.json`
+records the exact component version, its reviewed manifest SRI and the tarball's
+19 file hashes. That input is compiled into the runtime and copied into the
+host-package binding. The producer and explicit runtime load verify the full
+component file closure. Status polling checks identities and core singleton paths
+without repeatedly hashing the payload. An equal-version duplicate, changed
+payload, nested dependency shadow, unknown fork version or altered owner/binding
+is rejected. A separately installed Profile component can share the Host's core
+peers without requiring the Host core to depend on the optional component.
+
+If the component is absent, the existing Manager can still select this one exact
+approved version and request its normal installation approval. The component
+remains optional and disabled by default. Local loading checks its own fixed
+Codex CLI `0.153.4` with `--version`; this does not make a model request or establish
+authenticated Codex end-to-end acceptance.
+
+完整源码测试切到新宿主后，发现了设置写入成功但后续读取仍返回旧值的问题，因而本次必须生成新 vh.12。
+旧 `46482a0b080ed77246889bcedb18fde1b17d1c12` / vh.11 源码与归档保留，不能覆写或继承其资格。
+vh.12 仍需新的精确归档、实际消费端单实例及 Profile 生命周期检查；Windows/Linux 原生资格需分别实测。

@@ -13,3 +13,15 @@ test('watchers receive the values from before the change', () => {
   config.mode = 'b'; listeners[0]()
   assert.deepEqual(seen, [['b', 'a'], ['b', 'b']])
 })
+
+test('live effective references take precedence over retained raw input', () => {
+  let value = 'before'
+  const raw = { mode: 'raw' }
+  const ctx = { settings: { configure() {}, update() {} }, effect() {},
+    fiber: { entry: { id: 'p' }, config: raw, effectiveConfig: { mode: { get: () => value } } } }
+  const adapter = createSettingsAdapter(ctx, { mode: 'apply-time' })
+  assert.equal(adapter.get().mode, 'before')
+  value = 'after'
+  assert.equal(adapter.get().mode, 'after')
+  assert.deepEqual(ctx.fiber.config, raw)
+})

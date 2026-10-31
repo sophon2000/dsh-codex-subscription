@@ -48,6 +48,27 @@ test('a missing web runtime is reported', async () => {
   await assert.rejects(switcher.select('auto'), /unavailable/)
 })
 
+test('separate raw input cannot hide the current effective search selection or trigger repeated restarts', async () => {
+  const raw = { searchProvider: 'deepseek-official', fetchProvider: 'http' }
+  const { entry, updates, loader } = loaderWith(raw)
+  entry.fiber.effectiveConfig = { searchProvider: { get: () => CODEX_AUTO_SEARCH_PROVIDER_ID } }
+  entry.fiber.config = raw
+  entry.fiber.update = async function (config, noSave) {
+    updates.push({ config, noSave })
+    this.config = config
+    this.effectiveConfig = { searchProvider: { get: () => config.searchProvider } }
+  }
+  const switcher = createSearchProviderSwitcher(loader)
+  assert.equal(switcher.current(), CODEX_AUTO_SEARCH_PROVIDER_ID)
+  await switcher.select('auto')
+  assert.equal(updates.length, 0)
+  await switcher.select('codex')
+  await switcher.select('codex')
+  assert.deepEqual(updates, [{ config: { ...raw, searchProvider: CODEX_SEARCH_PROVIDER_ID }, noSave: true }])
+  assert.equal(switcher.current(), CODEX_SEARCH_PROVIDER_ID)
+  assert.equal(switcher.dshProviderId(), 'deepseek-official')
+})
+
 const subscriptionProviderIds = [CODEX_SEARCH_PROVIDER_ID, CODEX_AUTO_SEARCH_PROVIDER_ID, DSH_SEARCH_PROVIDER_ID]
 
 for (const searchProvider of subscriptionProviderIds) {

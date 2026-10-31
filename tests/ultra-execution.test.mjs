@@ -98,6 +98,27 @@ test('global Ultra default falls back on unsupported models and presets without 
   h.dispose()
 })
 
+test('native delegation availability follows the effective provider and tool instead of raw input', () => {
+  const raw = { provider: 'spawn', toolName: 'raw-tool' }
+  const fiber = { config: raw, effectiveConfig: { provider: 'effective-provider', toolName: 'live-tool' } }
+  const entry = { options: { name: '@deepseek-ai/dsh-tool-subagent', config: raw }, fiber }
+  const providers = new Set(['spawn'])
+  const tools = { guard() {}, get() {} }
+  const presets = { generations: new Map([['fixture', { mount: { tree: { entries: () => [entry] } } }]]) }
+  const ctx = { get: name => name === 'tools' ? tools : name === 'subagents'
+    ? { getProvider: name => providers.has(name) } : name === 'agentPresets' ? presets : undefined,
+    on() { return () => {} } }
+  const ultra = createUltraExecutionPreset({ catalog: {}, record() {} })
+  const dispose = ultra.install(ctx)
+  assert.equal(ultra.available(), false, 'a different raw provider cannot grant delegation capability')
+  fiber.effectiveConfig = { provider: 'spawn', toolName: 'live-tool' }
+  assert.equal(ultra.available(), true)
+  fiber.effectiveConfig = { provider: 'unavailable' }
+  assert.equal(ultra.available(), false)
+  assert.equal(fiber.config, raw)
+  dispose()
+})
+
 test('the installed SDK capability controls whether Ultra can be advertised', async () => {
   const h = fixture()
   const supported = typeof appendPluginRecord === 'function'

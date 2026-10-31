@@ -56,6 +56,7 @@ test('normal installation reuses exact host modules through paths with spaces an
   assert.equal(manifest.dependencies.ws, '8.21.3')
   assert.equal(manifest.scripts, undefined)
   assert.equal(manifest.devDependencies, undefined)
+  assert.ok(manifest.files.includes('scripts/runtime-binding.mjs'))
   assert.equal(f.template.dependencies['@deepseek-ai/dsh-home-paths'], 'official')
   assert.ok(!JSON.stringify(manifest).includes(f.directory))
 })
@@ -109,7 +110,7 @@ test('host archive retains every upstream release file, including deferred chunk
   const root = new URL('../', import.meta.url)
   const manifest = JSON.parse(readFileSync(new URL('package.json', root)))
   const upstreamFiles = globSync(manifest.files, { cwd: root }).map(file => file.replaceAll('\\', '/'))
-  assert.deepEqual(payloadFiles(), [...new Set([...upstreamFiles, 'scripts/host-package.mjs', 'native/README.md'])].sort())
+  assert.deepEqual(payloadFiles(), [...new Set([...upstreamFiles, 'scripts/host-package.mjs', 'scripts/runtime-binding.mjs', 'native/README.md'])].sort())
 })
 
 for (const name of ['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-format-catalog']) {

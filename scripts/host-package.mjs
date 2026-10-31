@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { verifyRuntimeOwner } from './runtime-binding.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const json = file => JSON.parse(readFileSync(file, 'utf8'))
@@ -68,7 +69,7 @@ export function adaptedManifest(template, config, host) {
   // The DSH installation owns home-paths too, rather than a second official runtime.
   delete manifest.dependencies['@deepseek-ai/dsh-home-paths']
   manifest.exports['./host-package'] = './scripts/host-package.mjs'
-  manifest.files = [...manifest.files, 'host-package.json', 'scripts/host-package.mjs']
+  manifest.files = [...manifest.files, 'host-package.json', 'scripts/host-package.mjs', 'scripts/runtime-binding.mjs']
   manifest.repository = { type: 'git', url: `${config.repository}.git` }
   delete manifest.scripts
   delete manifest.devDependencies
@@ -90,6 +91,10 @@ export function verifyHostPackage(pluginDirectory, hostManifest) {
     if (!host.roots[name]) continue
     assert.equal(packageRoot(name, [join(plugin, 'package.json')]), host.roots[name], `Duplicate host runtime: ${name}`)
   }
+  if (binding.subagentRuntime && host.roots['@deepseek-ai/dsh-subagent-codex']) {
+    verifyRuntimeOwner(binding, join(host.roots['@deepseek-ai/dsh-llm'], 'package.json'),
+      join(host.roots['@deepseek-ai/dsh-subagent-codex'], 'package.json'))
+  }
   return { version: manifest.version, hostVersion: host.version, peers: Object.keys(binding.packages).length }
 }
 
@@ -104,7 +109,7 @@ export function payloadFiles() {
   // Explicit allowlist: no credentials, node_modules, symlinks, maps or machine state.
   return ['README.md', 'README.en.md', 'DIRECTORY.md', 'compatibility.json', 'LICENSE',
     'SECURITY.md', 'THIRD_PARTY_NOTICES.md', 'icon-subscription.webp', 'cordis.patch.yml',
-    'scripts/host-package.mjs', 'native/linux-voice-helper.py', 'native/README.md',
+    'scripts/host-package.mjs', 'scripts/runtime-binding.mjs', 'native/linux-voice-helper.py', 'native/README.md',
     ...readdirSync(join(root, 'lib')).filter(x => x.endsWith('.js')).map(x => `lib/${x}`),
     ...readdirSync(join(root, 'locale')).filter(x => x.endsWith('.json')).map(x => `locale/${x}`),
   ].sort()
@@ -143,7 +148,12 @@ export async function prepareHostPackage({ hostManifest, pnpmCli, output }) {
   assert.equal(json(resolve(pnpmCli, '../../package.json')).version, config.pnpmVersion, 'Use the pinned artifact packer')
   const host = inspectHost(hostManifest, template, config.hostVersion)
   const binding = { schemaVersion: 1, version: config.version, hostVersion: host.version,
-    repository: config.repository, sourceCommit: git(['rev-parse', 'HEAD']), packages: host.packages }
+    repository: config.repository, sourceCommit: git(['rev-parse', 'HEAD']), packages: host.packages,
+    ...(config.subagentRuntime ? { subagentRuntime: config.subagentRuntime } : {}) }
+  if (config.subagentRuntime && host.roots['@deepseek-ai/dsh-subagent-codex']) {
+    verifyRuntimeOwner(binding, join(host.roots['@deepseek-ai/dsh-llm'], 'package.json'),
+      join(host.roots['@deepseek-ai/dsh-subagent-codex'], 'package.json'))
+  }
   const archiveName = `${template.name}-${config.version}.tgz`
   const destination = resolve(output)
   mkdirSync(destination, { recursive: true })

@@ -222,6 +222,16 @@ test('configured id honors the native constructor env snapshot and never resurre
   assert.equal(configuredFetchProviderId({ fetchProviderEnv: 'original-env' }, [old], 'later-env'), 'original-env')
 })
 
+test('effective fetch references take precedence over separately retained raw input', () => {
+  let selected = 'live-provider'
+  const entry = { options: { id: 'web', config: { fetchProvider: 'saved-provider' } },
+    fiber: { config: { fetchProvider: 'stale-raw' }, effectiveConfig: { fetchProvider: { get: () => selected } } } }
+  assert.equal(configuredFetchProviderId({}, [entry], 'environment'), 'live-provider')
+  selected = undefined
+  assert.equal(configuredFetchProviderId({}, [entry], 'environment'), 'environment')
+  assert.equal(configuredFetchProviderId({}, [entry], undefined), undefined)
+})
+
 test('old native constructor id overrides later raw config and ambient env, including an absent id', async () => {
   const entries = [{ options: { id: 'web', config: { fetchProvider: 'stale-raw' } } }]
   const host = { __proto__: WebRuntime.prototype, fetchProviderId: 'original-id', config: { fetchProvider: { get: () => 'later-volatile' } } }

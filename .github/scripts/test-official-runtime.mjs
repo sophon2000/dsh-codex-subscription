@@ -17,6 +17,7 @@ try {
   for (const name of ['src', 'tests', 'scripts', 'package.json', 'cordis.patch.yml']) {
     cpSync(join(source, name), join(probe, name), { recursive: true })
   }
+  if (existsSync(join(source, 'host-artifact.json'))) cpSync(join(source, 'host-artifact.json'), join(probe, 'host-artifact.json'))
   // Release checkouts intentionally have no node_modules. Only these test-owned
   // packages come from the separately materialized, frozen checkout lockfile.
   // DSH packages still resolve from the official runner's own cohort.
