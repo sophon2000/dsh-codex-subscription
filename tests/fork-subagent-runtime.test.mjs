@@ -26,7 +26,7 @@ test('an unfamiliar fork suffix and a mismatched component cohort remain unavail
   const host = join(root, 'host.json'), provider = join(root, 'provider.json')
   const resolve = specifier => specifier === '@deepseek-ai/dsh-llm/package.json' ? host
     : specifier === `${name}/package.json` ? provider : require.resolve(specifier)
-  for (const version of ['9.9.9', config.hostVersion.replace('.vh.1.', '.vh.2.')]) {
+  for (const version of ['9.9.9', config.hostVersion.replace(/\.vh\.\d+\./u, '.vh.999.')]) {
     writeFileSync(host, JSON.stringify({ name: '@deepseek-ai/dsh-llm', version }))
     writeFileSync(provider, JSON.stringify({ name, version }))
     assert.equal(matchingSubagentRuntimeVersion(resolve), undefined)

@@ -112,9 +112,9 @@ Run `tests/subagent-backend-lifecycle.test.mjs` with `DSH_CODEX_TEST_HOST_MANIFE
 ## Source development cohort / 源码开发宿主
 
 `dev-host.json` records the default development input: DSH
-`0.2.2-alpha.2.vh.1.local.20261031.1` from source
-`3400c4a11043fbd0ab486561edc23d6309f41463`, manifest SHA-256
-`74194986c3bb60fa62e7819772512c9cfd62203da9f224b46fb9e0b5e64b7c58`,
+`0.2.2-alpha.2.vh.2.local.20261031.1` from source
+`17eeb2094fea6e08067fdfd3ab34c3b44c4fdead`, manifest SHA-256
+`a67b211db222696ec2811a024b8c0abb88984e5c9eb327477ed29e6a93ae6c77`,
 the nine exact vendor versions including Cordis `4.0.6-alpha.1` and Schemastery
 `3.18.6-alpha.1`, and pi-ai/pi-telemetry `1.3.0`. These unpublished SDK inputs
 require the matching reviewed candidate registry when installing; they cannot be
@@ -212,3 +212,42 @@ exclusion rule.
 
 vh.13 修复的是合法安装布局的接纳边界，不改变 DSH/SDK 字节、公共稳定兼容范围、可选组件默认值或 Manager 审批流程。
 新版本仍需自身归档收据、最终消费端固定安装及真实 Profile 生命周期验收；vh.12 的测试记录不能替代这些步骤。
+
+
+## 3.2.1-vh.14 security-fixed Host cohort / 安全修复后的宿主绑定
+
+vh.14 targets DSH `0.2.2-alpha.2.vh.2.local.20261031.1` from the exact source
+and manifest above. That DSH cohort fixes the native filesystem execution binding
+in core. The former vh.1 cohort and its immutable plugin/SDK archives remain
+available as historical evidence; they do not qualify this security-fixed input.
+The upstream plugin version and public compatibility declarations stay unchanged.
+
+The optional component is the new cohort's exact
+`@deepseek-ai/dsh-subagent-codex` package: tarball SHA-256
+`65ebaef9a1cdcdb1dd1b019de4eaf6043bd86d5850fe653ce8b5d0db424109f7`.
+Its SRI and full 19-file map come from that reviewed tarball. The separately fixed
+Desktop SDK SHA-256
+`c269e767d3c30457750a1ad318129b1830298532072296d18bfbe65cde96376c`
+supplies the exact 16-file projection; only the same three declaration files are
+omitted. The new component package metadata differs from the vh.13 input, so the
+old Desktop hash map is not reused. All ten framework dependencies are bound to
+their exact versions with the existing Host/Profile physical ownership checks.
+SDK API 1, Host protocol 4, owned Codex CLI `0.153.4` and optional installation
+approval remain unchanged. A local CLI version check makes no model request.
+
+Source development keeps pnpm `11.26.0`, the canonical shared pi-ai `1.3.0` patch,
+and existing public dependency pins. Exact private overrides and release-age
+exclusions are derived from the reviewed 387-package manifest; native packages
+use their fixed candidate tarball URLs. Normal package-manager resolution and a
+frozen install must confirm the resulting lock and package integrity. Do not
+relax the release-age policy or accept a similar fork suffix.
+
+Freeze the rebuilt source before packing. Repeat packing against the actual
+new consumer Host must produce identical archive bytes and receipts before the
+vh.14 artifact is published. Source tests, packaging, Desktop projection and
+consumer Profile/native qualification are separate observations; no earlier pass
+is inherited and no existing vh.13 archive is overwritten.
+
+vh.14 为新的安全修复宿主生成独立绑定。完整 19 文件、SDK 精确 16 文件投影、组件 SRI
+及十项框架依赖均取自新固定输入；旧 vh.13 / 旧 SDK 的摘要和字节保留。源码测试与实际消费端
+复打、单实例和 Profile 生命周期仍须分别记录，不以本次元数据升级代替运行资格。

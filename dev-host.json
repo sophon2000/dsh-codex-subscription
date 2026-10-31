@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "source": {
     "repository": "git@github.com:sophon2000/deepseek-harness.git",
-    "commit": "3400c4a11043fbd0ab486561edc23d6309f41463",
-    "tree": "6295973ce333b70adf3c833c99131bb04e16fd2d",
+    "commit": "17eeb2094fea6e08067fdfd3ab34c3b44c4fdead",
+    "tree": "59d7fccf4fdfabdbfcb9e0a8411ecc882f3bcded",
     "lockfileSha256": "2146eda4285ce1173f5a75d3d65d8002c49b6da9ad4aa5ee3cfbf8958930264e",
     "officialBase": "master@ce7073d51254c26cd63b22a60835b8f948deb447"
   },
-  "manifestSha256": "74194986c3bb60fa62e7819772512c9cfd62203da9f224b46fb9e0b5e64b7c58",
-  "dshVersion": "0.2.2-alpha.2.vh.1.local.20261031.1",
+  "manifestSha256": "a67b211db222696ec2811a024b8c0abb88984e5c9eb327477ed29e6a93ae6c77",
+  "dshVersion": "0.2.2-alpha.2.vh.2.local.20261031.1",
   "vendors": {
     "@deepseek-ai/cordis": "4.0.6-alpha.1",
     "@deepseek-ai/cordis-plugin-group": "1.0.6-alpha.1",
@@ -25,7 +25,7 @@
     "@earendil-works/pi-ai@1.3.0": {
       "file": "patches/@earendil-works__pi-ai@1.3.0.patch",
       "sha256": "4e1c90fd00aea42989664504668633033c1962e53c07860901edb4f72d843765",
-      "sourceCommit": "3400c4a11043fbd0ab486561edc23d6309f41463",
+      "sourceCommit": "17eeb2094fea6e08067fdfd3ab34c3b44c4fdead",
       "sourceBlob": "111e09dceeda04eeb09b034e551a9c495ecff495",
       "sourcePath": "patches/@earendil-works__pi-ai@1.3.0.patch",
       "scope": "shared",

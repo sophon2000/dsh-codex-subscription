@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": "3.2.1-vh.13",
-  "hostVersion": "0.2.2-alpha.2.vh.1.local.20261031.1",
+  "version": "3.2.1-vh.14",
+  "hostVersion": "0.2.2-alpha.2.vh.2.local.20261031.1",
   "pnpmVersion": "11.9.0",
   "repository": "https://github.com/sophon2000/dsh-codex-subscription",
   "subagentRuntime": {
-    "version": "0.2.2-alpha.2.vh.1.local.20261031.1",
-    "integrity": "sha512-9ITOtFPX/1nl8gFlZn9P5rT1mEKWff/IZEZIqMLbM6wpUnoNthuhOE3YsPjiA57Y51pQGnLuk0NahDswtG6TAA==",
+    "version": "0.2.2-alpha.2.vh.2.local.20261031.1",
+    "integrity": "sha512-vQWoUh7xdwX5rj5SqJtZo1AI1LFsGRyWjEUt9GAye6qTbwwpBqVModMf5NZguXzJ47kH52z1pdjj/idXeehGYQ==",
     "files": {
       "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
       "README.i18n.yaml": "db5be2be2f9403de5130e9cb78079a06bbab2cc8934045bc9671a9e03c1b3687",
@@ -26,7 +26,7 @@
       "locale/pt.json": "5a4e064f7be47c284b919f7994425c8cf636b7c1b4bf019360c0c8b2a2414572",
       "locale/ru.json": "d487e1b8de3fae823b2aa6e7ef6b339f6257f1c7b78b1923fe7ea209905bf0bf",
       "locale/zh.json": "b7dbe995afe99a2b1adbd520b143d37345ad7deed7191f12d046585a30ff409c",
-      "package.json": "6eea119ba58c06eb8acfb0674e916162b349ce15068318224f9f1a737976a508"
+      "package.json": "5cbdb155305d9288f70cfa03d85c6df6282c8f17a1d3d7366eef88e90741efb4"
     },
     "desktopFiles": {
       "LICENSE": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
@@ -44,19 +44,19 @@
       "locale/pt.json": "5a4e064f7be47c284b919f7994425c8cf636b7c1b4bf019360c0c8b2a2414572",
       "locale/ru.json": "d487e1b8de3fae823b2aa6e7ef6b339f6257f1c7b78b1923fe7ea209905bf0bf",
       "locale/zh.json": "b7dbe995afe99a2b1adbd520b143d37345ad7deed7191f12d046585a30ff409c",
-      "package.json": "6eea119ba58c06eb8acfb0674e916162b349ce15068318224f9f1a737976a508"
+      "package.json": "5cbdb155305d9288f70cfa03d85c6df6282c8f17a1d3d7366eef88e90741efb4"
     },
-    "desktopSdkSha256": "f20d4900a6a81622069d8885eb4643896dbb376bb84eddd76db9164488e20ba8",
+    "desktopSdkSha256": "c269e767d3c30457750a1ad318129b1830298532072296d18bfbe65cde96376c",
     "dependencies": {
       "@deepseek-ai/cordis": "4.0.6-alpha.1",
-      "@deepseek-ai/dsh-brand": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-llm": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-sdk-protocol": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-session": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-subagent": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-subprocess": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-timeout": "0.2.2-alpha.2.vh.1.local.20261031.1",
-      "@deepseek-ai/dsh-tool-subagent": "0.2.2-alpha.2.vh.1.local.20261031.1",
+      "@deepseek-ai/dsh-brand": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-llm": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-sdk-protocol": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-session": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-subagent": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-subprocess": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-timeout": "0.2.2-alpha.2.vh.2.local.20261031.1",
+      "@deepseek-ai/dsh-tool-subagent": "0.2.2-alpha.2.vh.2.local.20261031.1",
       "@deepseek-ai/schemastery": "3.18.6-alpha.1"
     }
   }

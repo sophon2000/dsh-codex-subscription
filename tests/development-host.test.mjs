@@ -28,9 +28,9 @@ const insideStore = path => {
 }
 
 test('default source tests resolve the reviewed installed development Host', () => {
-  assert.equal(host.dshVersion, '0.2.2-alpha.2.vh.1.local.20261031.1')
-  assert.equal(host.source.commit, '3400c4a11043fbd0ab486561edc23d6309f41463')
-  assert.equal(host.manifestSha256, '74194986c3bb60fa62e7819772512c9cfd62203da9f224b46fb9e0b5e64b7c58')
+  assert.equal(host.dshVersion, '0.2.2-alpha.2.vh.2.local.20261031.1')
+  assert.equal(host.source.commit, '17eeb2094fea6e08067fdfd3ab34c3b44c4fdead')
+  assert.equal(host.manifestSha256, 'a67b211db222696ec2811a024b8c0abb88984e5c9eb327477ed29e6a93ae6c77')
   assert.equal(Object.keys(host.vendors).length, 9)
   for (const [name, version] of Object.entries(manifest.devDependencies)) {
     if (!name.startsWith('@deepseek-ai/')) continue
