@@ -19,6 +19,11 @@ versions through a reviewed `host-artifact.json` commit. Then run:
 node scripts/host-package.mjs prepare --host "<installed-dsh>/package.json" --pnpm-cli "<pnpm>/bin/pnpm.cjs" --output ".artifacts/video-host"
 ```
 
+The frozen vh.13 producer input is commit
+`472f4395ceffea69f1372862be2c6c083a443901`, retained in a clean artifact worktree.
+Development-input successors do not replace that producer input; do not generate
+different bytes under the existing vh.13 version from a later source commit.
+
 先按本仓锁文件安装、测试和构建并提交，再指定消费端已安装的 **DSH CLI package.json**（不是 Profile 或工作区 manifest）与固定 pnpm 脚本执行上述命令。
 宿主快照必须来自实际消费端的冻结安装；全包冷安装可能将兼容的第三方包提升到不同版本，不能据此替代产品锁中的单实例基线。
 路径含空格时加引号；Windows 也用 `node` 和 `.cjs` 参数，不依赖 Bash、`ln`、管理员软链接或安装钩子。
@@ -121,6 +126,14 @@ pnpm install --frozen-lockfile --ignore-scripts --registry "<reviewed-candidate-
 pnpm test
 pnpm run build
 ```
+
+The development cohort also applies the exact DSH shared
+[pi-ai 1.3.0 patch](../patches/README.md) through pnpm `patchedDependencies`.
+The patch defers streamed argument JSON parsing until completion and retains
+Gemini tool-call thought signatures; its canonical source and digest are recorded
+in `dev-host.json`. This changes the local Host-owned dependency used by source
+tests, while the plugin keeps pi-ai external in its shipped build. The frozen
+vh.13 producer commit and 21-file artifact remain unchanged.
 
 The default full source suite now runs this installed cohort. The development
 delivery test checks exact direct and transitive SDK identities and requires their

@@ -2,6 +2,9 @@ allowBuilds:
   '@google/genai': false
   protobufjs: false
 
+patchedDependencies:
+  '@earendil-works/pi-ai@1.3.0': patches/@earendil-works__pi-ai@1.3.0.patch
+
 # Source development uses the reviewed master candidate recorded in dev-host.json.
 # Keep the ordinary public package and peer compatibility declarations unchanged.
 # These exact overrides also prevent a second SDK/vendor family through peers.
